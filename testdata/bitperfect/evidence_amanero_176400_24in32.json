@@ -1,0 +1,27 @@
+{
+  "device_id": "{0.0.0.00000000}.{479066c4-a97e-41db-949e-80bfd6b8901c}",
+  "device_name": "数字输出 (Amanero Technologies USB Driver 1.0.67)",
+  "driver": "Amanero Technologies",
+  "requested_format": {
+    "sample_rate": 176400,
+    "channels": 2,
+    "sample_format": 2,
+    "channel_mask": 0
+  },
+  "actual_format": {
+    "sample_rate": 176400,
+    "channels": 2,
+    "sample_format": 2,
+    "channel_mask": 0
+  },
+  "source_data_sha256": "cee69f7c1ee4368350e248b8491c373f62feba48a35bd5655c49bf00e061a9fc",
+  "captured_data_sha256": "cee69f7c1ee4368350e248b8491c373f62feba48a35bd5655c49bf00e061a9fc",
+  "total_frames_compared": 1764,
+  "total_bytes_compared": 14112,
+  "diff_offsets": [],
+  "bit_perfect_eligible": true,
+  "bit_perfect_verified": true,
+  "status": "Verified",
+  "verification_timestamp": "2026-11-14T12:14:22Z",
+  "notes": "100% bit-perfect match across all samples and bytes"
+}

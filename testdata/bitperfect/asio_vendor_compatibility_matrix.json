@@ -1,0 +1,365 @@
+{
+  "generated_at": "2026-11-14T04:14:19.2062863-08:00",
+  "records": [
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "PCM 44100Hz",
+      "format_type": "PCM",
+      "sample_rate": 44100,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "PCM 48000Hz",
+      "format_type": "PCM",
+      "sample_rate": 48000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "PCM 96000Hz",
+      "format_type": "PCM",
+      "sample_rate": 96000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "PCM 192000Hz",
+      "format_type": "PCM",
+      "sample_rate": 192000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "PCM 384000Hz",
+      "format_type": "PCM",
+      "sample_rate": 384000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "DSD64 (2.8224MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 2822400,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8MSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "DSD128 (5.6448MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 5644800,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8MSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "DSD256 (11.2896MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 11289600,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8MSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "Thesycon USB Audio 2.0 Class Driver",
+      "driver_version": "0x0512",
+      "tested_format": "DSD512 (22.5792MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 22579200,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8MSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "PCM 44100Hz",
+      "format_type": "PCM",
+      "sample_rate": 44100,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "PCM 48000Hz",
+      "format_type": "PCM",
+      "sample_rate": 48000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "PCM 96000Hz",
+      "format_type": "PCM",
+      "sample_rate": 96000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "PCM 192000Hz",
+      "format_type": "PCM",
+      "sample_rate": 192000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "PCM 384000Hz",
+      "format_type": "PCM",
+      "sample_rate": 384000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt32LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "DSD64 (2.8224MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 2822400,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8LSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "DSD128 (5.6448MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 5644800,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8LSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "DSD256 (11.2896MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 11289600,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8LSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "ASIO Combo384 Driver",
+      "driver_version": "0x0103",
+      "tested_format": "DSD512 (22.5792MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 22579200,
+      "supported": true,
+      "sample_type_string": "ASIOSTDSDInt8LSB1",
+      "note": "Hardware Native DSD bitstream validated"
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "PCM 44100Hz",
+      "format_type": "PCM",
+      "sample_rate": 44100,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt24LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "PCM 48000Hz",
+      "format_type": "PCM",
+      "sample_rate": 48000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt24LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "PCM 96000Hz",
+      "format_type": "PCM",
+      "sample_rate": 96000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt24LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "PCM 192000Hz",
+      "format_type": "PCM",
+      "sample_rate": 192000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt24LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "PCM 384000Hz",
+      "format_type": "PCM",
+      "sample_rate": 384000,
+      "supported": false,
+      "sample_type_string": "ASIOSTInt24LSB",
+      "note": ""
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "DSD64 (2.8224MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 2822400,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "Yamaha hardware does not support Native DSD directly"
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "DSD128 (5.6448MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 5644800,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "Yamaha hardware does not support Native DSD directly"
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "DSD256 (11.2896MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 11289600,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "Yamaha hardware does not support Native DSD directly"
+    },
+    {
+      "driver_name": "Yamaha Steinberg USB ASIO",
+      "driver_version": "0x0211",
+      "tested_format": "DSD512 (22.5792MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 22579200,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "Yamaha hardware does not support Native DSD directly"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "PCM 44100Hz",
+      "format_type": "PCM",
+      "sample_rate": 44100,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt16LSB",
+      "note": "WDM-to-ASIO PCM compatibility path only (Not Native DSD)"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "PCM 48000Hz",
+      "format_type": "PCM",
+      "sample_rate": 48000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt16LSB",
+      "note": "WDM-to-ASIO PCM compatibility path only (Not Native DSD)"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "PCM 96000Hz",
+      "format_type": "PCM",
+      "sample_rate": 96000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt16LSB",
+      "note": "WDM-to-ASIO PCM compatibility path only (Not Native DSD)"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "PCM 192000Hz",
+      "format_type": "PCM",
+      "sample_rate": 192000,
+      "supported": true,
+      "sample_type_string": "ASIOSTInt16LSB",
+      "note": "WDM-to-ASIO PCM compatibility path only (Not Native DSD)"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "PCM 384000Hz",
+      "format_type": "PCM",
+      "sample_rate": 384000,
+      "supported": false,
+      "sample_type_string": "ASIOSTInt16LSB",
+      "note": "WDM-to-ASIO PCM compatibility path only (Not Native DSD)"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "DSD64 (2.8224MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 2822400,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "ASIO4ALL does not support Native DSD"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "DSD128 (5.6448MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 5644800,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "ASIO4ALL does not support Native DSD"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "DSD256 (11.2896MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 11289600,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "ASIO4ALL does not support Native DSD"
+    },
+    {
+      "driver_name": "ASIO4ALL v2",
+      "driver_version": "0x020E",
+      "tested_format": "DSD512 (22.5792MHz)",
+      "format_type": "Native DSD",
+      "sample_rate": 22579200,
+      "supported": false,
+      "sample_type_string": "Unsupported",
+      "note": "ASIO4ALL does not support Native DSD"
+    }
+  ]
+}
