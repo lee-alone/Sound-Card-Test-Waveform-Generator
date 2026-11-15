@@ -6,6 +6,7 @@ import (
 
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 // MetrologyWidget presents the secondary readouts directly under the scope.
@@ -65,21 +66,21 @@ func (m *MetrologyWidget) Build() g.Widget {
 	nyquistMargin := nyquistLimit - freq
 	nyquistUsagePct := (freq / nyquistLimit) * 100.0
 	nyquistColor := ColorTextMuted
-	nyquistText := fmt.Sprintf("%.1f %%  ·  余量 %.0f Hz", nyquistUsagePct, nyquistMargin)
+	nyquistText := i18n.T("metrology.nyquist_margin_fmt", nyquistUsagePct, nyquistMargin)
 	if nyquistUsagePct > 100.0 {
 		nyquistColor = ColorAlarmRed
-		nyquistText = fmt.Sprintf("%.1f %%  ·  超限", nyquistUsagePct)
+		nyquistText = i18n.T("metrology.over_limit_fmt", nyquistUsagePct)
 	}
 
 	return g.Table().
 		Flags(g.TableFlagsNoSavedSettings | g.TableFlagsSizingStretchSame | g.TableFlagsNoBordersInBody).
 		NoHeader(true).
 		Rows(g.TableRow(
-			metricCell("峰值", fmt.Sprintf("%.4f FS", vPeakFS), ColorPhosphorGreen),
+			metricCell(i18n.T("metrology.peak"), fmt.Sprintf("%.4f FS", vPeakFS), ColorPhosphorGreen),
 			metricCell("RMS", fmt.Sprintf("%.4f FS", vRmsFS), ColorDigitalCyan),
-			metricCell("峰值因数", fmt.Sprintf("%.2f dB", crestFactorDB), ColorTextBright),
-			metricCell("周期", fmt.Sprintf("%.3f ms", periodMs), ColorTextBright),
-			metricCell("采样密度", fmt.Sprintf("%.1f 点/周期", samplesPerCycle), ColorTextMuted),
-			metricCell("安全余量", nyquistText, nyquistColor),
+			metricCell(i18n.T("metrology.crest_factor"), fmt.Sprintf("%.2f dB", crestFactorDB), ColorTextBright),
+			metricCell(i18n.T("metrology.period"), fmt.Sprintf("%.3f ms", periodMs), ColorTextBright),
+			metricCell(i18n.T("metrology.sample_density"), i18n.T("metrology.samples_per_cycle_fmt", samplesPerCycle), ColorTextMuted),
+			metricCell(i18n.T("metrology.safety_margin"), nyquistText, nyquistColor),
 		))
 }

@@ -1,7 +1,6 @@
 package giuui
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -9,6 +8,8 @@ import (
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/audio"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/ui/assets"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 const (
@@ -24,9 +25,9 @@ const (
 	transportBarHeight = float32(64)
 	devicePanelWidth   = float32(332)
 
-	dopConfirmationPopupID = "DoP DSD 载波输出安全确认##dop-confirm"
-	nativeDSDPopupID       = "Native DSD 1-bit 直通安全确认##native-dsd-confirm"
-	genericSafetyPopupID   = "通用安全风险确认##generic-safety-confirm"
+	dopConfirmationPopupID = "dop-dsd-confirmation##dop-confirm"
+	nativeDSDPopupID       = "native-dsd-confirmation##native-dsd-confirm"
+	genericSafetyPopupID   = "generic-safety-confirmation##generic-safety-confirm"
 )
 
 type GiuApp struct {
@@ -45,6 +46,8 @@ type GiuApp struct {
 }
 
 func NewGiuApp(uiService *controller.UIService) *GiuApp {
+	locale := loadUILocale()
+	i18n.SetLocale(locale)
 	state := NewUIState()
 
 	app := &GiuApp{
@@ -56,7 +59,7 @@ func NewGiuApp(uiService *controller.UIService) *GiuApp {
 	app.devicePanel = NewDevicePanel(uiService, state, app.ApplyConfiguration, app.RequestNativeDSDConfirmation)
 	app.generatorPanel = NewGeneratorPanel(uiService, state, app.ApplyConfiguration, app.RequestDoPConfirmation)
 	app.diagnosticsPanel = NewDiagnosticsPanel(uiService, state)
-	app.topBar = NewTopBar(state, app.StopPlayback)
+	app.topBar = NewTopBar(state, app.StopPlayback, app.changeLanguage)
 	app.transportBar = NewTransportBar(
 		state,
 		app.StartPlayback,
@@ -67,25 +70,55 @@ func NewGiuApp(uiService *controller.UIService) *GiuApp {
 	return app
 }
 
+func (a *GiuApp) changeLanguage(index int32) {
+	locale := i18n.ByIndex(int(index))
+	i18n.SetLocale(locale)
+	a.state.SelectedLanguageIndex = int32(i18n.Index(locale))
+	_ = saveUILocale(locale)
+	if a.window != nil {
+		a.window.SetTitle(i18n.T("app.window_title"))
+	}
+	if !a.state.IsOutputRunning() {
+		a.devicePanel.RefreshDevices()
+		a.state.StatusMessage = i18n.T("status.ready")
+	}
+	a.safeUpdate()
+}
+
 func (a *GiuApp) StartPlayback() {
 	a.generatorPanel.StartPlayback()
 	a.state.IsActiveStream = a.state.ErrorMessage == "" &&
 		!a.state.PendingSafetyStart && !a.state.ShowSafetyConfirm && !a.state.ShowDoPConfirm
 	if a.state.IsActiveStream {
-		a.state.StreamStartTime = time.Now()
+		a.restartPlaybackClock()
 	} else {
-		a.state.StreamStartTime = time.Time{}
+		a.clearPlaybackClock()
 	}
 	a.safeUpdate()
 }
 
 func (a *GiuApp) StopPlayback() {
-	a.state.StreamStartTime = time.Time{}
+	a.clearPlaybackClock()
 	a.generatorPanel.StopPlayback()
 	if a.state.ErrorMessage == "" {
 		a.state.IsActiveStream = false
 	}
 	a.safeUpdate()
+}
+
+func (a *GiuApp) restartPlaybackClock() {
+	now := time.Now()
+	a.state.StreamStartTime = now
+	a.state.SignalStartTime = now
+}
+
+func (a *GiuApp) restartSignalClock() {
+	a.state.SignalStartTime = time.Now()
+}
+
+func (a *GiuApp) clearPlaybackClock() {
+	a.state.StreamStartTime = time.Time{}
+	a.state.SignalStartTime = time.Time{}
 }
 
 // BuildExtendedRequest translates GUI state into the domain request. Indexes
@@ -99,7 +132,7 @@ func (a *GiuApp) BuildExtendedRequest() controller.ExtendedSignalRequest {
 	rateIndex := clampIndex(a.state.SelectedSampleRateIndex, len(SampleRateOptions))
 	formatIndex := clampIndex(a.state.SelectedSampleFormatIndex, len(SampleFormatOptions))
 	waveIndex := clampIndex(a.state.SelectedWaveformIndex, len(WaveformOptions))
-	channelIndex := clampIndex(a.state.SelectedChannelMode, len(ChannelModeLabels))
+	channelIndex := clampIndex(a.state.SelectedChannelMode, len(ChannelModeLabelKeys))
 
 	sampleRate := SampleRateOptions[rateIndex]
 	sampleFmt := SampleFormatOptions[formatIndex]
@@ -183,7 +216,7 @@ func (a *GiuApp) safeUpdate() {
 
 func (a *GiuApp) ApplyConfiguration() {
 	if a.state.IsDoPSelected() && !a.state.DoPConfirmed {
-		a.state.StatusMessage = "DoP 待安全确认：输出保持静音"
+		a.state.StatusMessage = i18n.T("app.status.dop_pending")
 		return
 	}
 
@@ -203,6 +236,12 @@ func (a *GiuApp) ApplyConfiguration() {
 		a.state.ErrorMessage = err.Error()
 	} else {
 		a.state.ErrorMessage = ""
+		// A running PCM stream hot-swaps its DSP source in place. The new
+		// generator starts at sample zero even though the audio stream uptime
+		// continues, so animated previews need their own epoch.
+		if wasRunning {
+			a.restartSignalClock()
+		}
 	}
 	a.safeUpdate()
 }
@@ -211,10 +250,10 @@ func (a *GiuApp) requestSafetyConfirmation(assessment controller.SafetyAssessmen
 	// A risk selected while audio is active must fail safe immediately.
 	_ = a.uiService.StopPlayback()
 	a.state.IsActiveStream = false
-	a.state.StreamStartTime = time.Time{}
+	a.clearPlaybackClock()
 	a.state.ErrorMessage = ""
 	a.state.SafetyAssessment = assessment
-	a.state.StatusMessage = "安全确认待处理：输出保持静音"
+	a.state.StatusMessage = i18n.T("app.status.safety_pending")
 	a.state.SuppressSafetyPrompt = false
 
 	if !a.state.ShowSafetyConfirm {
@@ -243,20 +282,20 @@ func (a *GiuApp) confirmSafety() {
 	if a.state.PendingSafetyStart {
 		a.state.PendingSafetyStart = false
 		if a.state.ErrorMessage == "" {
-			a.state.StreamStartTime = time.Now()
 			if err := a.uiService.StartPlayback(); err != nil {
-				a.state.ErrorMessage = fmt.Sprintf("启动输出失败: %v", err)
+				a.state.ErrorMessage = i18n.T("app.error.start_fmt", err)
 			} else {
+				a.restartPlaybackClock()
 				a.state.IsActiveStream = true
-				a.state.StatusMessage = "信号输出中"
+				a.state.StatusMessage = i18n.T("generator.status.running")
 			}
 		}
 	} else if a.state.ErrorMessage == "" {
-		a.state.StatusMessage = "安全确认已应用，输出保持静音"
+		a.state.StatusMessage = i18n.T("app.status.safety_applied")
 	}
 
 	if saveWarning != "" {
-		a.state.StatusMessage = fmt.Sprintf("安全确认已应用，但保存“以后不再提示”失败: %s", saveWarning)
+		a.state.StatusMessage = i18n.T("app.error.safety_save_fmt", saveWarning)
 	}
 	a.safeUpdate()
 }
@@ -267,30 +306,30 @@ func (a *GiuApp) cancelSafety() {
 	a.state.PendingSafetyStart = false
 	a.state.SafetyAssessment = controller.SafetyAssessment{}
 	g.CloseCurrentPopup()
-	a.state.StatusMessage = "安全确认已取消，输出保持静音"
+	a.state.StatusMessage = i18n.T("app.status.safety_cancelled")
 	a.safeUpdate()
 }
 
 func (a *GiuApp) genericSafetyConfirmationModal() g.Widget {
-	confirmLabel := "确认并应用"
+	confirmLabel := i18n.T("safety.confirm_apply")
 	if a.state.PendingSafetyStart {
-		confirmLabel = "确认并开始输出"
+		confirmLabel = i18n.T("safety.confirm_start")
 	}
 	return g.PopupModal(genericSafetyPopupID).
 		Flags(g.WindowFlagsAlwaysAutoResize).
 		Layout(
 			g.Dummy(px(580), 1),
-			fontLabel("安全风险确认", 16, ColorAlarmRed),
-			fontLabel(a.state.SafetyAssessment.Title, 12.5, ColorTextBright),
+			fontLabel(i18n.T("safety.title"), 16, ColorAlarmRed),
+			fontLabel(i18n.RiskTitle(string(a.state.SafetyAssessment.Category)), 12.5, ColorTextBright),
 			g.Separator(),
-			g.Label(a.state.SafetyAssessment.WarningMessage).Wrapped(true),
+			g.Label(i18n.RiskWarning(string(a.state.SafetyAssessment.Category))).Wrapped(true),
 			g.Spacing(),
-			fontLabel("确认前输出保持静音。请降低监听音量并检查后级设备。", 11, ColorAmberWarning),
+			fontLabel(i18n.T("safety.output_muted"), 11, ColorAmberWarning),
 			g.Spacing(),
-			g.Checkbox("以后不再提示此类风险（保存到本机）", &a.state.SuppressSafetyPrompt),
+			g.Checkbox(i18n.T("safety.suppress"), &a.state.SuppressSafetyPrompt),
 			g.Separator(),
 			g.Row(
-				StyleQuietButton(g.Button("取消并保持静音").Size(px(190), px(38)).OnClick(a.cancelSafety)),
+				StyleQuietButton(g.Button(i18n.T("safety.cancel")).Size(px(190), px(38)).OnClick(a.cancelSafety)),
 				g.Spacing(),
 				StyleDangerButton(g.Button(confirmLabel).Size(px(250), px(38)).OnClick(a.confirmSafety)),
 			),
@@ -302,7 +341,7 @@ func (a *GiuApp) RequestDoPConfirmation() {
 		return
 	}
 	a.state.ShowDoPConfirm = true
-	a.state.StatusMessage = "DoP 待安全确认：输出保持静音"
+	a.state.StatusMessage = i18n.T("app.status.dop_pending")
 	g.OpenPopup(dopConfirmationPopupID)
 }
 
@@ -317,9 +356,9 @@ func (a *GiuApp) confirmDoP() {
 	if a.state.ErrorMessage == "" {
 		if wasRunning {
 			a.state.IsActiveStream = true
-			a.state.StreamStartTime = time.Now()
+			a.restartPlaybackClock()
 		}
-		a.state.StatusMessage = "DoP 已解锁，载波参数已锁定"
+		a.state.StatusMessage = i18n.T("app.status.dop_unlocked")
 	}
 }
 
@@ -327,7 +366,7 @@ func (a *GiuApp) cancelDoPConfirmation() {
 	a.state.ShowDoPConfirm = false
 	a.state.DoPConfirmed = false
 	g.CloseCurrentPopup()
-	a.state.StatusMessage = "DoP 尚未解锁，输出保持静音"
+	a.state.StatusMessage = i18n.T("app.status.dop_locked")
 }
 
 func (a *GiuApp) dopConfirmationModal() g.Widget {
@@ -335,24 +374,24 @@ func (a *GiuApp) dopConfirmationModal() g.Widget {
 		Flags(g.WindowFlagsAlwaysAutoResize).
 		Layout(
 			g.Dummy(px(540), 1),
-			fontLabel("DoP DSD 载波输出 · 不可跳过的安全确认", 16, ColorAlarmRed),
+			fontLabel(i18n.T("dop.modal_title"), 16, ColorAlarmRed),
 			g.Separator(),
-			g.Label(controller.DoPRiskWarningPrompt).Wrapped(true),
+			g.Label(i18n.T("risk.dop_carrier.warning")).Wrapped(true),
 			g.Spacing(),
-			fontLabel("本操作将强制使用 24-in-32、独占模式、0 dBFS Unity Gain，并禁用淡化和左右电平调整。", 11, ColorAmberWarning),
-			fontLabel("若 DAC 不支持 dCS DoP v1.1，解码结果可能是不可预期的全幅噪声。", 11, ColorAmberWarning),
+			fontLabel(i18n.T("dop.constraints"), 11, ColorAmberWarning),
+			fontLabel(i18n.T("dop.unknown_noise"), 11, ColorAmberWarning),
 			g.Separator(),
 			g.Row(
-				StyleQuietButton(g.Button("取消并保持静音").Size(px(190), px(36)).OnClick(a.cancelDoPConfirmation)),
+				StyleQuietButton(g.Button(i18n.T("safety.cancel")).Size(px(190), px(36)).OnClick(a.cancelDoPConfirmation)),
 				g.Spacing(),
-				StyleDangerButton(g.Button("我已知晓风险，启用 DoP").Size(px(270), px(36)).OnClick(a.confirmDoP)),
+				StyleDangerButton(g.Button(i18n.T("dop.confirm")).Size(px(270), px(36)).OnClick(a.confirmDoP)),
 			),
 		)
 }
 
 func (a *GiuApp) RequestNativeDSDConfirmation() {
 	if !a.state.IsAsioSelected() {
-		a.state.NativeDSDError = "Native DSD 仅支持 ASIO 输出设备"
+		a.state.NativeDSDError = i18n.T("app.native.error.asio_only")
 		return
 	}
 	a.state.NativeDSDConfirmation = ""
@@ -363,11 +402,11 @@ func (a *GiuApp) RequestNativeDSDConfirmation() {
 
 func (a *GiuApp) confirmNativeDSD() {
 	if !a.state.IsAsioSelected() {
-		a.state.NativeDSDError = "Native DSD 仅支持 ASIO 输出设备"
+		a.state.NativeDSDError = i18n.T("app.native.error.asio_only")
 		return
 	}
 	if a.state.NativeDSDConfirmation != "YES" {
-		a.state.NativeDSDError = "必须准确输入大写 YES 方可确认"
+		a.state.NativeDSDError = i18n.T("app.native.error.yes_required")
 		return
 	}
 	if err := a.uiService.ConfirmNativeDSDRisk(a.state.NativeDSDConfirmation); err != nil {
@@ -375,10 +414,10 @@ func (a *GiuApp) confirmNativeDSD() {
 		return
 	}
 
-	nativeFormat := a.state.SelectedNativeDSDFormat().String()
+	nativeFormat := a.state.SelectedNativeDSDFormat().ShortName()
 	if err := a.uiService.ConfigureNativeDSD(nativeFormat); err != nil {
 		a.state.NativeDSDError = err.Error()
-		a.state.StatusMessage = "Native DSD 未启用：输出保持静音"
+		a.state.StatusMessage = i18n.T("app.native.status.failed")
 		a.safeUpdate()
 		return
 	}
@@ -392,7 +431,7 @@ func (a *GiuApp) confirmNativeDSD() {
 	a.state.ShowNativeDSDConfirm = false
 	g.CloseCurrentPopup()
 	a.state.NativeDSDError = ""
-	a.state.StatusMessage = "Native DSD 已创建：1-bit 直通缓冲已预载并保持静音"
+	a.state.StatusMessage = i18n.T("app.native.status.created")
 	a.devicePanel.RefreshAsioStatus()
 	a.safeUpdate()
 }
@@ -401,7 +440,7 @@ func (a *GiuApp) cancelNativeDSDConfirmation() {
 	if err := a.uiService.CancelNativeDSDEntry(); err != nil {
 		a.state.NativeDSDError = err.Error()
 	} else {
-		a.state.NativeDSDError = "Native DSD 尚未确认，输出保持静音"
+		a.state.NativeDSDError = i18n.T("app.native.error.not_confirmed")
 	}
 	a.state.ResetNativeDSDSession()
 	g.CloseCurrentPopup()
@@ -413,18 +452,19 @@ func (a *GiuApp) nativeDSDConfirmationModal() g.Widget {
 		Flags(g.WindowFlagsAlwaysAutoResize).
 		Layout(
 			g.Dummy(px(560), 1),
-			fontLabel("Native DSD 1-bit 直通 · 不可跳过的安全确认", 16, ColorAlarmRed),
+			fontLabel(i18n.T("native.modal_title"), 16, ColorAlarmRed),
 			g.Separator(),
-			g.Label("Native DSD 将绕过 PCM 与 DoP 封装，直接把 1-bit 位流写入 ASIO 硬件缓冲。错误的采样率、字节位序或 DAC 固件状态可能产生不可预期的全幅高频噪声。").Wrapped(true),
+			g.Label(i18n.T("native.warning")).Wrapped(true),
+			g.Label(i18n.T("native.combo_hint")).Wrapped(true),
 			g.Spacing(),
-			fontLabel("请断开扬声器/耳机和后级功放，或将其增益降至最低。", 11, ColorAmberWarning),
-			fontLabel("驱动不支持所选格式时，控制器会拒绝启用并保持静音。", 11, ColorAmberWarning),
+			fontLabel(i18n.T("native.disconnect"), 11, ColorAmberWarning),
+			fontLabel(i18n.T("native.driver_guard"), 11, ColorAmberWarning),
 			g.Separator(),
-			captionLabel("Native DSD 测试格式"),
+			captionLabel(i18n.T("native.format")),
 			g.Combo("##nativeDsdEntryFormat", NativeDSDFormatLabels[formatIndex], NativeDSDFormatLabels, &a.state.NativeDSDFormatIndex).
 				Size(px(560)).
 				OnChange(func() { a.state.NativeDSDError = "" }),
-			captionLabel("请输入精确大写 YES 以解除核心安全拦截锁"),
+			captionLabel(i18n.T("native.type_yes")),
 			g.InputText(&a.state.NativeDSDConfirmation).
 				Hint("YES").
 				Flags(g.InputTextFlagsCharsUppercase).
@@ -437,9 +477,9 @@ func (a *GiuApp) nativeDSDConfirmationModal() g.Widget {
 			}(),
 			g.Spacing(),
 			g.Row(
-				StyleQuietButton(g.Button("取消并保持静音").Size(px(190), px(36)).OnClick(a.cancelNativeDSDConfirmation)),
+				StyleQuietButton(g.Button(i18n.T("safety.cancel")).Size(px(190), px(36)).OnClick(a.cancelNativeDSDConfirmation)),
 				g.Spacing(),
-				StyleDangerButton(g.Button("确认 YES 并启用 Native DSD").Size(px(300), px(36)).OnClick(a.confirmNativeDSD)),
+				StyleDangerButton(g.Button(i18n.T("native.confirm")).Size(px(300), px(36)).OnClick(a.confirmNativeDSD)),
 			),
 		)
 }
@@ -547,7 +587,10 @@ func (a *GiuApp) loop() {
 }
 
 func (a *GiuApp) Run() error {
-	a.window = g.NewMasterWindow("声卡测试信号发生器 · Pro Audio Lab", defaultWindowWidth, defaultWindowHeight, 0)
+	a.window = g.NewMasterWindow(i18n.T("app.window_title"), defaultWindowWidth, defaultWindowHeight, 0)
+	if icons := assets.LoadWindowIcons(); len(icons) > 0 {
+		a.window.SetIcon(icons...)
+	}
 	a.window.SetBgColor(ColorCanvas)
 	a.window.SetTargetFPS(60)
 

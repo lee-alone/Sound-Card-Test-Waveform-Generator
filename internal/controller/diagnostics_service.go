@@ -12,25 +12,25 @@ import (
 
 // DiagnosticsReport is returned to the UI at 10Hz polling frequency.
 type DiagnosticsReport struct {
-	State                     engine.State    `json:"state"`
-	DeviceName                string          `json:"device_name"`
-	Exclusive                 bool            `json:"exclusive"`
-	SampleRate                int             `json:"sample_rate"`
-	SampleFormat              string          `json:"sample_format"`
-	Channels                  int             `json:"channels"`
-	BufferPeriodMs            float64         `json:"buffer_period_ms"`
-	BufferFrames              int             `json:"buffer_frames"`
-	BitPerfectStatus          BitPerfectTier  `json:"bit_perfect_status"`
-	RenderCallbackCount       uint64          `json:"render_callback_count"`
-	UnderrunCount             uint64          `json:"underrun_count"`
-	LateCallbackCount         uint64          `json:"late_callback_count"`
-	LastRenderTimeUs          float64         `json:"last_render_time_us"`
-	MaxRenderTimeUs           float64         `json:"max_render_time_us"`
-	P999RenderTimeUs          float64         `json:"p999_render_time_us"`
-	RenderTimePercentOfBuffer float64         `json:"render_time_percent_of_buffer"`
-	MaxPercentOfBuffer        float64         `json:"max_percent_of_buffer"`
-	P999PercentOfBuffer       float64         `json:"p999_percent_of_buffer"`
-	Timestamp                 time.Time       `json:"timestamp"`
+	State                     engine.State   `json:"state"`
+	DeviceName                string         `json:"device_name"`
+	Exclusive                 bool           `json:"exclusive"`
+	SampleRate                int            `json:"sample_rate"`
+	SampleFormat              string         `json:"sample_format"`
+	Channels                  int            `json:"channels"`
+	BufferPeriodMs            float64        `json:"buffer_period_ms"`
+	BufferFrames              int            `json:"buffer_frames"`
+	BitPerfectStatus          BitPerfectTier `json:"bit_perfect_status"`
+	RenderCallbackCount       uint64         `json:"render_callback_count"`
+	UnderrunCount             uint64         `json:"underrun_count"`
+	LateCallbackCount         uint64         `json:"late_callback_count"`
+	LastRenderTimeUs          float64        `json:"last_render_time_us"`
+	MaxRenderTimeUs           float64        `json:"max_render_time_us"`
+	P999RenderTimeUs          float64        `json:"p999_render_time_us"`
+	RenderTimePercentOfBuffer float64        `json:"render_time_percent_of_buffer"`
+	MaxPercentOfBuffer        float64        `json:"max_percent_of_buffer"`
+	P999PercentOfBuffer       float64        `json:"p999_percent_of_buffer"`
+	Timestamp                 time.Time      `json:"timestamp"`
 }
 
 // PercentileTracker maintains a circular window of recent render durations.
@@ -64,8 +64,15 @@ func (pt *PercentileTracker) Record(durationNs int64) {
 	pt.mu.Unlock()
 }
 
-// P999 calculates the 99.9th percentile duration in nanoseconds.
-func (pt *PercentileTracker) P999() int64 {
+// Percentile calculates a percentile duration in nanoseconds using the
+// nearest-rank definition. The percentile is clamped to [0, 1].
+func (pt *PercentileTracker) Percentile(percentile float64) int64 {
+	if percentile < 0 {
+		percentile = 0
+	} else if percentile > 1 {
+		percentile = 1
+	}
+
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -77,7 +84,7 @@ func (pt *PercentileTracker) P999() int64 {
 	copy(cpy, pt.samples[:pt.count])
 	sort.Slice(cpy, func(i, j int) bool { return cpy[i] < cpy[j] })
 
-	rank := int(math.Ceil(0.999*float64(pt.count))) - 1
+	rank := int(math.Ceil(percentile*float64(pt.count))) - 1
 	if rank < 0 {
 		rank = 0
 	}
@@ -86,6 +93,11 @@ func (pt *PercentileTracker) P999() int64 {
 	}
 	return cpy[rank]
 }
+
+// P50, P99, and P999 return common render-duration percentiles.
+func (pt *PercentileTracker) P50() int64  { return pt.Percentile(0.50) }
+func (pt *PercentileTracker) P99() int64  { return pt.Percentile(0.99) }
+func (pt *PercentileTracker) P999() int64 { return pt.Percentile(0.999) }
 
 // Reset clears recorded percentile history.
 func (pt *PercentileTracker) Reset() {

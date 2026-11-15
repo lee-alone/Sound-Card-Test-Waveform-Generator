@@ -76,3 +76,30 @@ func TestInterleaveOverloadRejection(t *testing.T) {
 		t.Errorf("Interleave with saturation failed: %v", err)
 	}
 }
+
+func TestChannelInterleave24In32Stereo(t *testing.T) {
+	ch0 := []float64{0.0, 1.0}
+	ch1 := []float64{-1.0, 0.5}
+	channels := [][]float64{ch0, ch1}
+
+	target := audio.AudioFormat{
+		SampleRate:   96000,
+		Channels:     2,
+		SampleFormat: audio.SampleFormat24In32,
+	}
+
+	dst := make([]byte, 2*2*4)
+	if err := Interleave(dst, channels, target, false); err != nil {
+		t.Fatalf("Interleave failed: %v", err)
+	}
+
+	expected := []byte{
+		0x00, 0x00, 0x00, 0x00, // 0.0
+		0x00, 0x00, 0x00, 0x80, // -1.0
+		0x00, 0xFF, 0xFF, 0x7F, // +1.0
+		0x00, 0x00, 0x00, 0x40, // +0.5
+	}
+	if !bytes.Equal(dst, expected) {
+		t.Errorf("Interleave 24-in-32 mismatch:\n got: %x\nwant: %x", dst, expected)
+	}
+}

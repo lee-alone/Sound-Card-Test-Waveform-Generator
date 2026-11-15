@@ -402,6 +402,39 @@ func TestScopeWidget_SweepAnimates(t *testing.T) {
 	}
 }
 
+func TestScopeWidget_SweepUsesSignalClockNotStreamClock(t *testing.T) {
+	state := NewUIState()
+	state.SelectedWaveformIndex = 3 // Linear sweep
+	state.SweepStartFreq = 20
+	state.SweepEndFreq = 20000
+	state.SweepDurationSec = 5
+	state.SweepLoop = true
+
+	clock := time.Unix(100, 0)
+	state.StreamStartTime = clock
+	state.SignalStartTime = clock
+	state.Diagnostics.BufferPeriodMs = 10
+
+	scope := NewScopeWidget(state)
+	scope.now = func() time.Time { return clock }
+
+	clock = clock.Add(2 * time.Second)
+	if got := scope.previewElapsed(clock); math.Abs(got-1.99) > 1e-9 {
+		t.Fatalf("preview should follow signal clock with buffer compensation, got %.9fs", got)
+	}
+
+	// Simulate a live sweep edit: DSP sample zero restarts while stream uptime
+	// continues. The scope must restart too instead of jumping to stream age.
+	state.SignalStartTime = clock
+	if got := scope.previewElapsed(clock); got != 0 {
+		t.Fatalf("preview should restart with the DSP source, got %.9fs", got)
+	}
+	clock = clock.Add(10 * time.Millisecond)
+	if got := scope.previewElapsed(clock); got != 0 {
+		t.Fatalf("buffer latency must hold the preview at sample zero until output starts, got %.9fs", got)
+	}
+}
+
 func countZeroCrossings(samples []float64) int {
 	crossings := 0
 	for i := 1; i < len(samples); i++ {
@@ -517,5 +550,31 @@ func TestUIState_ASIOAndNativeDSDSelection(t *testing.T) {
 	state.NativeDSDFormatIndex = 1
 	if state.SelectedNativeDSDFormat() != dsd.DSD512 {
 		t.Fatalf("expected native DSD512, got %v", state.SelectedNativeDSDFormat())
+	}
+}
+
+func TestAdjustFrequencyForWheel(t *testing.T) {
+	tests := []struct {
+		name    string
+		current float64
+		min     float64
+		max     float64
+		wheel   float64
+		want    float64
+	}{
+		{name: "up one notch", current: 1000, min: 1, max: 20000, wheel: 1, want: 1100},
+		{name: "down one notch", current: 1000, min: 1, max: 20000, wheel: -1, want: 909},
+		{name: "low frequency precision", current: 5, min: 1, max: 20000, wheel: 1, want: 5.5},
+		{name: "clamp upper", current: 20000, min: 1, max: 20000, wheel: 1, want: 20000},
+		{name: "clamp lower", current: 1, min: 1, max: 20000, wheel: -1, want: 1},
+		{name: "zero wheel", current: 440, min: 1, max: 20000, wheel: 0, want: 440},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := adjustFrequencyForWheel(tc.current, tc.min, tc.max, tc.wheel)
+			if math.Abs(got-tc.want) > 1e-6 {
+				t.Fatalf("adjustFrequencyForWheel() = %f, want %f", got, tc.want)
+			}
+		})
 	}
 }

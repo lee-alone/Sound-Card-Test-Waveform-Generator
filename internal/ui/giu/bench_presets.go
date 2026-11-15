@@ -3,48 +3,49 @@ package giuui
 import (
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 type BenchPreset struct {
-	Name        string
-	Description string
-	Waveform    controller.WaveformType
-	Frequency   float32
-	VolumeDBFS  float32
-	SweepStart  float32
-	SweepEnd    float32
-	SweepDur    float32
-	ChannelMode ChannelMode
+	NameKey        string
+	DescriptionKey string
+	Waveform       controller.WaveformType
+	Frequency      float32
+	VolumeDBFS     float32
+	SweepStart     float32
+	SweepEnd       float32
+	SweepDur       float32
+	ChannelMode    ChannelMode
 }
 
 var StandardBenchPresets = []BenchPreset{
 	{
-		Name: "1 kHz / 0 dBFS", Description: "全幅 THD+N 基准",
+		NameKey: "preset.full_scale.name", DescriptionKey: "preset.full_scale.desc",
 		Waveform: controller.WaveformSine, Frequency: 1000, VolumeDBFS: 0, ChannelMode: ChannelModeStereo,
 	},
 	{
-		Name: "1 kHz / -1 dBFS", Description: "防削顶与过载容限",
+		NameKey: "preset.minus1.name", DescriptionKey: "preset.minus1.desc",
 		Waveform: controller.WaveformSine, Frequency: 1000, VolumeDBFS: -1, ChannelMode: ChannelModeStereo,
 	},
 	{
-		Name: "1 kHz / -60 dBFS", Description: "动态范围与底噪",
+		NameKey: "preset.minus60.name", DescriptionKey: "preset.minus60.desc",
 		Waveform: controller.WaveformSine, Frequency: 1000, VolumeDBFS: -60, ChannelMode: ChannelModeStereo,
 	},
 	{
-		Name: "20 Hz – 20 kHz 对数扫频", Description: "全频带频率响应",
+		NameKey: "preset.sweep.name", DescriptionKey: "preset.sweep.desc",
 		Waveform: controller.WaveformLogarithmicSweep, SweepStart: 20, SweepEnd: 20000, SweepDur: 5,
 		VolumeDBFS: -6, ChannelMode: ChannelModeStereo,
 	},
 	{
-		Name: "SMPTE 互调", Description: "60 Hz + 7 kHz",
+		NameKey: "preset.smpte.name", DescriptionKey: "preset.smpte.desc",
 		Waveform: controller.WaveformMultitoneSMPTE, VolumeDBFS: -6, ChannelMode: ChannelModeStereo,
 	},
 	{
-		Name: "CCIF 差频", Description: "19 kHz + 20 kHz",
+		NameKey: "preset.ccif.name", DescriptionKey: "preset.ccif.desc",
 		Waveform: controller.WaveformMultitoneCCIF, VolumeDBFS: -6, ChannelMode: ChannelModeStereo,
 	},
 	{
-		Name: "CMRR 差分反相", Description: "右声道 180° 反相",
+		NameKey: "preset.cmrr.name", DescriptionKey: "preset.cmrr.desc",
 		Waveform: controller.WaveformSine, Frequency: 1000, VolumeDBFS: -6, ChannelMode: ChannelModeInvertR,
 	},
 }
@@ -87,19 +88,19 @@ func (b *BenchPresetsBar) ApplyPreset(p BenchPreset) {
 func (b *BenchPresetsBar) Build() g.Widget {
 	labels := make([]string, len(StandardBenchPresets))
 	for i, preset := range StandardBenchPresets {
-		labels[i] = preset.Name
+		labels[i] = i18n.T(preset.NameKey)
 	}
 
-	preview := "选择标准测量预设"
-	description := "载入后立即应用完整信号参数"
+	preview := i18n.T("preset.select")
+	description := i18n.T("preset.default_desc")
 	if int(b.state.SelectedPresetIndex) >= 0 && int(b.state.SelectedPresetIndex) < len(StandardBenchPresets) {
 		preset := StandardBenchPresets[b.state.SelectedPresetIndex]
-		preview = preset.Name
-		description = preset.Description
+		preview = i18n.T(preset.NameKey)
+		description = i18n.T(preset.DescriptionKey)
 	}
 
 	return g.Row(
-		captionLabel("测量预设"),
+		captionLabel(i18n.T("preset.measurement")),
 		g.Combo("##benchPreset", preview, labels, &b.state.SelectedPresetIndex).
 			Size(px(270)).
 			OnChange(func() {

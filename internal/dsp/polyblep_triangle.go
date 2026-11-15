@@ -16,6 +16,7 @@ type PolyBLEPTriangleGenerator struct {
 
 	phase     float64 // running normalized phase in [0, 1)
 	phaseStep float64 // phase increment per 2x sub-sample: (f / (2 * Fs))
+	invStep   float64 // precomputed 1 / phaseStep for the BLEP hot path
 
 	decimator HalfbandDecimator47
 }
@@ -51,6 +52,7 @@ func (g *PolyBLEPTriangleGenerator) Prepare(cfg Config) error {
 
 	// 2x oversampling phase increment per sub-step
 	g.phaseStep = g.frequency / (2.0 * g.sampleRate)
+	g.invStep = 1.0 / g.phaseStep
 	g.phase = g.initialPhase
 
 	g.decimator.Reset()
@@ -62,10 +64,11 @@ func (g *PolyBLEPTriangleGenerator) Prepare(cfg Config) error {
 // warmUpDecimator primes the halfband decimator filter state.
 func (g *PolyBLEPTriangleGenerator) warmUpDecimator() {
 	dt := g.phaseStep
+	invDt := g.invStep
 	p := g.phase
 
 	for i := 0; i < 96; i++ {
-		s := g.computeSubSample(p, dt)
+		s := g.computeSubSample(p, dt, invDt)
 		g.decimator.PushSample(s)
 		p += dt
 		if p >= 1.0 {
@@ -86,7 +89,7 @@ func (g *PolyBLEPTriangleGenerator) Reset(policy ResetPolicy) {
 }
 
 // computeSubSample computes a single PolyBLAMP-smoothed 2x oversampled sample.
-func (g *PolyBLEPTriangleGenerator) computeSubSample(p, dt float64) float64 {
+func (g *PolyBLEPTriangleGenerator) computeSubSample(p, dt, invDt float64) float64 {
 	// Naive bipolar triangle wave in [-1.0, +1.0]
 	naive := 4.0*p - 1.0
 	if p >= 0.5 {
@@ -98,7 +101,7 @@ func (g *PolyBLEPTriangleGenerator) computeSubSample(p, dt float64) float64 {
 	if d0 >= 0.5 {
 		d0 -= 1.0
 	}
-	u0 := d0 / dt
+	u0 := d0 * invDt
 	b0 := PolyBLAMP4Continuous(u0)
 
 	// Corner 1: peak at p = 0.5 (slope changes from +4 to -4: Δs = -8)
@@ -108,7 +111,7 @@ func (g *PolyBLEPTriangleGenerator) computeSubSample(p, dt float64) float64 {
 	} else if d1 >= 0.5 {
 		d1 -= 1.0
 	}
-	u1 := d1 / dt
+	u1 := d1 * invDt
 	b1 := PolyBLAMP4Continuous(u1)
 
 	// Corner correction = Δs * dt * BLAMP(u)
@@ -123,11 +126,12 @@ func (g *PolyBLEPTriangleGenerator) Render(dst []float64) {
 	amp := g.amplitude
 	dc := g.dcOffset
 	dt := g.phaseStep
+	invDt := g.invStep
 	p := g.phase
 
 	for i := 0; i < len(dst); i++ {
 		// Sub-step 1: compute first oversampled sample and push into decimator
-		s1 := g.computeSubSample(p, dt)
+		s1 := g.computeSubSample(p, dt, invDt)
 		g.decimator.PushSample(s1)
 		p += dt
 		if p >= 1.0 {
@@ -135,7 +139,7 @@ func (g *PolyBLEPTriangleGenerator) Render(dst []float64) {
 		}
 
 		// Sub-step 2: compute second oversampled sample, push, and decimate
-		s2 := g.computeSubSample(p, dt)
+		s2 := g.computeSubSample(p, dt, invDt)
 		g.decimator.PushSample(s2)
 		p += dt
 		if p >= 1.0 {

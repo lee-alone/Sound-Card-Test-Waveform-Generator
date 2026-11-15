@@ -10,12 +10,18 @@ import (
 	"github.com/AllenDang/cimgui-go/imgui"
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 type preciseFrequencyField struct {
 	text    string
 	editing bool
 }
+
+const (
+	frequencySliderMin = 1.0
+	frequencyWheelStep = 1.10
+)
 
 // GeneratorPanel owns the signal source, the time-domain preview and the
 // channel-level rail. The oscilloscope is the visual anchor; controls stay in
@@ -90,12 +96,12 @@ func (p *GeneratorPanel) IsNyquistExceeded() bool {
 func (p *GeneratorPanel) StartPlayback() {
 	if p.state.IsDoPSelected() && !p.state.DoPConfirmed {
 		p.requestDoPConfirmation()
-		p.state.StatusMessage = "DoP 待安全确认：输出保持静音"
+		p.state.StatusMessage = i18n.T("generator.dop_pending")
 		return
 	}
 
 	if p.IsNyquistExceeded() {
-		p.state.ErrorMessage = "频率已超过奈奎斯特安全上限，禁止启动。"
+		p.state.ErrorMessage = i18n.T("generator.error.nyquist")
 		return
 	}
 
@@ -111,10 +117,10 @@ func (p *GeneratorPanel) StartPlayback() {
 	}
 
 	if err := p.uiService.StartPlayback(); err != nil {
-		p.state.ErrorMessage = fmt.Sprintf("启动输出失败: %v", err)
+		p.state.ErrorMessage = i18n.T("generator.error.start_fmt", err)
 		return
 	}
-	p.state.StatusMessage = "信号输出中"
+	p.state.StatusMessage = i18n.T("generator.status.running")
 }
 
 func (p *GeneratorPanel) requestDoPConfirmation() {
@@ -130,7 +136,7 @@ func (p *GeneratorPanel) onWaveformChanged() {
 		p.state.ApplyDoPConstraints()
 		if !p.state.DoPConfirmed {
 			p.requestDoPConfirmation()
-			p.state.StatusMessage = "DoP 待安全确认：输出保持静音"
+			p.state.StatusMessage = i18n.T("generator.dop_pending")
 			return
 		}
 	}
@@ -141,7 +147,7 @@ func (p *GeneratorPanel) onDoPParametersChanged() {
 	p.state.ApplyDoPConstraints()
 	if !p.state.DoPConfirmed {
 		p.requestDoPConfirmation()
-		p.state.StatusMessage = "DoP 待安全确认：输出保持静音"
+		p.state.StatusMessage = i18n.T("generator.dop_pending")
 		return
 	}
 	p.onParamChanged()
@@ -150,10 +156,10 @@ func (p *GeneratorPanel) onDoPParametersChanged() {
 func (p *GeneratorPanel) StopPlayback() {
 	p.state.ErrorMessage = ""
 	if err := p.uiService.StopPlayback(); err != nil {
-		p.state.ErrorMessage = fmt.Sprintf("停止输出失败: %v", err)
+		p.state.ErrorMessage = i18n.T("generator.error.stop_fmt", err)
 		return
 	}
-	p.state.StatusMessage = "输出已静音"
+	p.state.StatusMessage = i18n.T("generator.status.muted")
 }
 
 func (p *GeneratorPanel) setFrequency(value float32) {
@@ -163,6 +169,60 @@ func (p *GeneratorPanel) setFrequency(value float32) {
 	}
 	p.state.Frequency = value
 	p.onParamChanged()
+}
+
+// adjustFrequencyForWheel applies multiplicative wheel steps so the control
+// remains useful across the full audio band instead of changing by fixed Hz.
+func adjustFrequencyForWheel(current, minValue, maxValue, wheel float64) float64 {
+	if maxValue < minValue {
+		maxValue = minValue
+	}
+	if math.Abs(wheel) < 1e-6 {
+		return math.Max(minValue, math.Min(maxValue, current))
+	}
+	next := current * math.Pow(frequencyWheelStep, wheel)
+	next = math.Max(minValue, math.Min(maxValue, next))
+
+	precision := 0.1
+	switch {
+	case next >= 1000:
+		precision = 10
+	case next >= 100:
+		precision = 1
+	}
+	next = math.Round(next/precision) * precision
+	return math.Max(minValue, math.Min(maxValue, next))
+}
+
+// logarithmicFrequencySlider keeps the visual drag logarithmic while exposing
+// the real frequency in Hz. Wheel adjustment is accepted only while hovered.
+func (p *GeneratorPanel) logarithmicFrequencySlider(id string, value *float32, maxValue, width float32) g.Widget {
+	return g.Custom(func() {
+		valueMin := float32(frequencySliderMin)
+		imgui.SetNextItemWidth(width)
+		changed := imgui.SliderFloatV(
+			id,
+			value,
+			valueMin,
+			maxValue,
+			"%.1f Hz",
+			imgui.SliderFlagsLogarithmic,
+		)
+		if changed {
+			p.onParamChanged()
+		}
+
+		if imgui.IsItemHovered() {
+			// Claim the wheel before the surrounding scroll panel processes it.
+			imgui.SetItemKeyOwner(imgui.KeyMouseWheelY)
+			wheel := float64(imgui.CurrentIO().MouseWheel())
+			next := adjustFrequencyForWheel(float64(*value), float64(valueMin), float64(maxValue), wheel)
+			if math.Abs(next-float64(*value)) > 1e-9 {
+				*value = float32(next)
+				p.onParamChanged()
+			}
+		}
+	})
 }
 
 func (p *GeneratorPanel) preciseFrequencyInput(field *preciseFrequencyField, value *float32, maxSafe float64, width float32, id string) g.Widget {
@@ -216,17 +276,15 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 	streamLocked := p.state.IsOutputRunning()
 	p.animateScope.Store(streamLocked && p.scopeWidget.NeedsAnimation())
 	waveIndex := clampIndex(p.state.SelectedWaveformIndex, len(WaveformOptions))
-	wavePreview := WaveformOptions[waveIndex].Label
+	wavePreview := WaveformLabelAt(waveIndex)
 
-	waveLabels := make([]string, len(WaveformOptions))
-	for i, w := range WaveformOptions {
-		waveLabels[i] = w.Label
-	}
+	waveLabels := WaveformLabels()
 	channelIndex := p.state.SelectedChannelMode
-	if channelIndex < 0 || int(channelIndex) >= len(ChannelModeLabels) {
+	if channelIndex < 0 || int(channelIndex) >= len(ChannelModeLabelKeys) {
 		channelIndex = 0
 	}
-	channelPreview := ChannelModeLabels[channelIndex]
+	channelPreview := ChannelModeLabelAt(int(channelIndex))
+	channelLabels := ChannelModeLabels()
 
 	headerH := px(32)
 	presetH := px(30)
@@ -255,26 +313,26 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 			return g.Dummy(px(1), px(1))
 		}
 		return StyleQuietButton(
-			g.Button("恢复默认 X 轴").
+			g.Button(i18n.T("generator.restore_x_axis")).
 				Size(px(108), px(22)).
 				OnClick(p.scopeWidget.ResetXZoom),
 		)
 	}()
 	scopeHeader := g.Row(
-		captionLabel("时域示波器"),
+		captionLabel(i18n.T("generator.scope.time_domain")),
 		g.Spacing(),
 		func() g.Widget {
 			if streamLocked {
-				return StyleBadge("实时", ColorPhosphorDark, ColorPhosphorGreen)
+				return StyleBadge(i18n.T("generator.scope.live"), ColorPhosphorDark, ColorPhosphorGreen)
 			}
-			return StyleBadge("待机", ColorSurfaceRaise, ColorTextMuted)
+			return StyleBadge(i18n.T("generator.scope.standby"), ColorSurfaceRaise, ColorTextMuted)
 		}(),
 		g.Spacing(),
 		fontLabel(waveDescription(selectedWave), 10.5, ColorTextMuted),
 		g.Spacing(),
-		fontLabel("L 左声道", 10.5, ColorDigitalCyan),
+		fontLabel(i18n.T("generator.scope.left"), 10.5, ColorDigitalCyan),
 		g.Spacing(),
-		fontLabel("R 右声道", 10.5, ColorAmberWarning),
+		fontLabel(i18n.T("generator.scope.right"), 10.5, ColorAmberWarning),
 		g.Spacing(),
 		scopeResetControl,
 	)
@@ -294,7 +352,7 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 
 	railContentW := railW - px(40)
 	widgets := []g.Widget{
-		sectionHeader("信号参数", ""),
+		sectionHeader(i18n.T("generator.signal_params"), ""),
 	}
 
 	switch selectedWave {
@@ -303,12 +361,9 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		frequencyInputW := px(64)
 		frequencySliderW := railContentW - frequencyFieldW - px(8)
 		widgets = append(widgets,
-			captionLabel(fmt.Sprintf("频率  ·  最高 %.0f Hz · 可精确输入", p.GetMaxSafeFrequency())),
+			captionLabel(i18n.T("generator.frequency_fmt", p.GetMaxSafeFrequency())),
 			g.Row(
-				g.SliderFloat(&p.state.Frequency, 1.0, float32(p.GetMaxSafeFrequency())).
-					Format("%.1f Hz").
-					Size(frequencySliderW).
-					OnChange(p.onParamChanged),
+				p.logarithmicFrequencySlider("##frequencyLogSlider", &p.state.Frequency, float32(p.GetMaxSafeFrequency()), frequencySliderW),
 				g.Spacing(),
 				p.preciseFrequencyInput(&p.frequencyField, &p.state.Frequency, p.GetMaxSafeFrequency(), frequencyInputW, "##frequencyInput"),
 			),
@@ -326,82 +381,78 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		frequencyInputW := px(64)
 		frequencySliderW := railContentW - frequencyFieldW - px(8)
 		widgets = append(widgets,
-			captionLabel("起始频率 · 可精确输入"),
+			captionLabel(i18n.T("generator.sweep.start")),
 			g.Row(
-				g.SliderFloat(&p.state.SweepStartFreq, 1.0, float32(p.GetMaxSafeFrequency())).
-					Format("%.1f Hz").Size(frequencySliderW).OnChange(p.onParamChanged),
+				p.logarithmicFrequencySlider("##sweepStartLogSlider", &p.state.SweepStartFreq, float32(p.GetMaxSafeFrequency()), frequencySliderW),
 				g.Spacing(),
 				p.preciseFrequencyInput(&p.sweepStartField, &p.state.SweepStartFreq, p.GetMaxSafeFrequency(), frequencyInputW, "##sweepStartInput"),
 			),
-			captionLabel("终止频率 · 可精确输入"),
+			captionLabel(i18n.T("generator.sweep.end")),
 			g.Row(
-				g.SliderFloat(&p.state.SweepEndFreq, 1.0, float32(p.GetMaxSafeFrequency())).
-					Format("%.1f Hz").Size(frequencySliderW).OnChange(p.onParamChanged),
+				p.logarithmicFrequencySlider("##sweepEndLogSlider", &p.state.SweepEndFreq, float32(p.GetMaxSafeFrequency()), frequencySliderW),
 				g.Spacing(),
 				p.preciseFrequencyInput(&p.sweepEndField, &p.state.SweepEndFreq, p.GetMaxSafeFrequency(), frequencyInputW, "##sweepEndInput"),
 			),
-			captionLabel("扫描时长"),
+			captionLabel(i18n.T("generator.sweep.duration")),
 			g.SliderFloat(&p.state.SweepDurationSec, 0.5, 30.0).
-				Format("%.1f 秒").Size(railContentW).OnChange(p.onParamChanged),
-			g.Checkbox("循环扫描", &p.state.SweepLoop).OnChange(p.onParamChanged),
+				Format(i18n.T("generator.sweep.seconds_fmt")).Size(railContentW).OnChange(p.onParamChanged),
+			g.Checkbox(i18n.T("generator.sweep.loop"), &p.state.SweepLoop).OnChange(p.onParamChanged),
 		)
 
 	case controller.WaveformWhiteNoise, controller.WaveformPinkNoise:
 		widgets = append(widgets,
-			fontLabel("全频带噪声", 13, ColorTextBright),
+			fontLabel(i18n.T("generator.noise.full_band"), 13, ColorTextBright),
 			captionLabel(waveDescription(selectedWave)),
 		)
 
 	case controller.WaveformMultitoneSMPTE, controller.WaveformMultitoneCCIF:
 		widgets = append(widgets,
-			fontLabel("互调失真测试", 13, ColorTextBright),
+			fontLabel(i18n.T("generator.multitone.imd"), 13, ColorTextBright),
 			captionLabel(waveDescription(selectedWave)),
 		)
 
 	case controller.WaveformDoP:
 		formatIndex := clampIndex(p.state.DoPFormatIndex, len(DoPFormatOptions))
-		bitOrderIndex := clampIndex(p.state.DoPBitOrderIndex, len(DoPBitOrderLabels))
-		formatLabels := make([]string, len(DoPFormatOptions))
-		for i, option := range DoPFormatOptions {
-			formatLabels[i] = option.Label
-		}
+		bitOrderIndex := clampIndex(p.state.DoPBitOrderIndex, len(DoPBitOrderLabelKeys))
+		formatLabels := DoPFormatLabels()
+		bitOrderLabels := DoPBitOrderLabels()
 		format := DoPFormatOptions[formatIndex]
 		bitOrder := DoPBitOrderOptions[bitOrderIndex]
 
 		widgets = append(widgets,
-			fontLabel("dCS DoP v1.1 载波", 13, ColorTextBright),
-			captionLabel("1-bit DSD 封装于 24-bit PCM 帧；不是 Native DSD。"),
-			captionLabel("DSD 位流规格"),
+			fontLabel(i18n.T("generator.dop.title"), 13, ColorTextBright),
+			captionLabel(i18n.T("generator.dop.description")),
+			captionLabel(i18n.T("generator.dop.stream_format")),
 			disableWhen(streamLocked,
-				g.Combo("##dopFormat", format.Label, formatLabels, &p.state.DoPFormatIndex).
+				g.Combo("##dopFormat", i18n.T(format.LabelKey), formatLabels, &p.state.DoPFormatIndex).
 					Size(railContentW).
 					OnChange(p.onDoPParametersChanged)),
-			captionLabel("Bit Order"),
+			captionLabel(i18n.T("generator.bit_order")),
 			disableWhen(streamLocked,
-				g.Combo("##dopBitOrder", DoPBitOrderLabels[bitOrderIndex], DoPBitOrderLabels, &p.state.DoPBitOrderIndex).
+				g.Combo("##dopBitOrder", DoPBitOrderLabelAt(bitOrderIndex), bitOrderLabels, &p.state.DoPBitOrderIndex).
 					Size(railContentW).
 					OnChange(p.onDoPParametersChanged)),
 			g.Separator(),
-			lockedParamRow("载波采样率", fmt.Sprintf("%.1f kHz", float64(format.CarrierRate)/1000.0), railContentW),
-			lockedParamRow("PCM 容器", "24-in-32 LE · 强制", railContentW),
-			lockedParamRow("输出增益", "0 dBFS Unity Gain", railContentW),
-			lockedParamRow("位序", bitOrder.String(), railContentW),
+			lockedParamRow(i18n.T("generator.dop.carrier_rate"), fmt.Sprintf("%.1f kHz", float64(format.CarrierRate)/1000.0), railContentW),
+			lockedParamRow(i18n.T("generator.pcm_container"), i18n.T("generator.pcm_container_forced"), railContentW),
+			lockedParamRow(i18n.T("generator.output_gain"), "0 dBFS Unity Gain", railContentW),
+			lockedParamRow(i18n.T("generator.bit_order"), bitOrder.String(), railContentW),
 			func() g.Widget {
 				if streamLocked {
-					return captionLabel("输出中已锁定；停止后可更改 DoP 载波参数。")
+					return captionLabel(i18n.T("generator.dop.locked_hint"))
 				}
 				return g.Dummy(px(1), px(1))
 			}(),
-			captionLabel("淡化、左右电平与校准微调在此路径禁用。"),
-			fontLabel("请先断开扬声器/耳机和模拟功放。", 10.5, ColorAmberWarning),
+			captionLabel(i18n.T("generator.dop.disabled_features")),
+			fontLabel(i18n.T("generator.dop.disconnect"), 10.5, ColorAmberWarning),
 		)
 
 		if p.state.DoPConfirmed {
-			widgets = append(widgets, StyleBadge("DoP 已安全解锁", ColorPhosphorDark, ColorPhosphorGreen))
+			widgets = append(widgets, StyleBadge(i18n.T("generator.dop.unlocked"), ColorPhosphorDark, ColorPhosphorGreen))
 		} else {
 			widgets = append(widgets,
 				StyleDangerButton(
-					g.Button("进行 DoP 安全确认").
+					g.Button(i18n.T("generator.dop.confirm")).
 						Size(railContentW, px(32)).
 						OnClick(p.requestDoPConfirmation),
 				),
@@ -425,18 +476,18 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 	if selectedWave == controller.WaveformDoP {
 		widgets = append(widgets,
 			g.Separator(),
-			fontLabel("DoP 固定电平", 12, ColorTextBright),
+			fontLabel(i18n.T("generator.dop.fixed_level"), 12, ColorTextBright),
 			lockedParamRow("L", "0.0 dBFS", railContentW),
 			lockedParamRow("R", "0.0 dBFS", railContentW),
-			captionLabel("Unity Gain 是 DoP 位完美传输的必要条件。"),
+			captionLabel(i18n.T("generator.dop.unity_req")),
 		)
 	} else {
 		widgets = append(widgets,
 			g.Separator(),
 			g.Row(
-				fontLabel("通道电平", 12, ColorTextBright),
+				fontLabel(i18n.T("generator.channel_level"), 12, ColorTextBright),
 				g.Spacing(),
-				g.Checkbox("联动", &p.state.LinkChannels),
+				g.Checkbox(i18n.T("generator.link"), &p.state.LinkChannels),
 			),
 			levelRow("L", &p.state.LeftVolumeDBFS, func() {
 				if p.state.LinkChannels {
@@ -461,19 +512,19 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 
 	return panelBox(width, height, ColorSurface,
 		g.Row(
-			sectionHeader("信号发生器", ""),
+			sectionHeader(i18n.T("generator.signal_generator"), ""),
 			g.Spacing(),
 			StyleBadge(channelPreview, ColorDigitalCyanDark, ColorDigitalCyan),
 		),
 		p.benchPresets.Build(),
 		g.Row(
-			captionLabel("波形"),
+			captionLabel(i18n.T("generator.waveform")),
 			g.Combo("##waveCombo", wavePreview, waveLabels, &p.state.SelectedWaveformIndex).
 				Size(waveComboW).
 				OnChange(p.onWaveformChanged),
 			g.Spacing(),
-			captionLabel("路由"),
-			g.Combo("##chanCombo", channelPreview, ChannelModeLabels, &p.state.SelectedChannelMode).
+			captionLabel(i18n.T("generator.routing")),
+			g.Combo("##chanCombo", channelPreview, channelLabels, &p.state.SelectedChannelMode).
 				Size(routeComboW).
 				OnChange(p.onParamChanged),
 		),
@@ -484,27 +535,27 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 func waveDescription(wave controller.WaveformType) string {
 	switch wave {
 	case controller.WaveformSine:
-		return "低失真正弦基准"
+		return i18n.T("wave.description.sine")
 	case controller.WaveformPolyBlepSquare:
-		return "带限方波 / PolyBLEP"
+		return i18n.T("wave.description.square")
 	case controller.WaveformPolyBlepTriangle:
-		return "带限三角波 / PolyBLEP"
+		return i18n.T("wave.description.triangle")
 	case controller.WaveformLinearSweep:
-		return "线性啁啾扫频"
+		return i18n.T("wave.description.linear")
 	case controller.WaveformLogarithmicSweep:
-		return "对数扫频 / 20 Hz–20 kHz"
+		return i18n.T("wave.description.log")
 	case controller.WaveformWhiteNoise:
-		return "平坦功率谱白噪声"
+		return i18n.T("wave.description.white")
 	case controller.WaveformPinkNoise:
-		return "按倍频程衰减的粉红噪声"
+		return i18n.T("wave.description.pink")
 	case controller.WaveformMultitoneSMPTE:
-		return "60 Hz + 7 kHz 互调"
+		return i18n.T("wave.description.smpte")
 	case controller.WaveformMultitoneCCIF:
-		return "19 kHz + 20 kHz 差频"
+		return i18n.T("wave.description.ccif")
 	case controller.WaveformDoP:
-		return "DSD over PCM 载波"
+		return i18n.T("wave.description.dop")
 	default:
-		return "测试信号"
+		return i18n.T("wave.description.test")
 	}
 }
 

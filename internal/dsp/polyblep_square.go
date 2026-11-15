@@ -16,6 +16,7 @@ type PolyBLEPSquareGenerator struct {
 
 	phase     float64 // running normalized phase in [0, 1)
 	phaseStep float64 // phase increment per 2x sub-sample: (f / (2 * Fs))
+	invStep   float64 // precomputed 1 / phaseStep for the BLEP hot path
 
 	decimator HalfbandDecimator47
 }
@@ -51,6 +52,7 @@ func (g *PolyBLEPSquareGenerator) Prepare(cfg Config) error {
 
 	// 2x oversampling phase increment per sub-step
 	g.phaseStep = g.frequency / (2.0 * g.sampleRate)
+	g.invStep = 1.0 / g.phaseStep
 	g.phase = g.initialPhase
 
 	g.decimator.Reset()
@@ -62,10 +64,11 @@ func (g *PolyBLEPSquareGenerator) Prepare(cfg Config) error {
 // warmUpDecimator primes the halfband decimator filter state.
 func (g *PolyBLEPSquareGenerator) warmUpDecimator() {
 	dt := g.phaseStep
+	invDt := g.invStep
 	p := g.phase
 
 	for i := 0; i < 96; i++ {
-		s := g.computeSubSample(p, dt)
+		s := g.computeSubSample(p, dt, invDt)
 		g.decimator.PushSample(s)
 		p += dt
 		if p >= 1.0 {
@@ -86,13 +89,13 @@ func (g *PolyBLEPSquareGenerator) Reset(policy ResetPolicy) {
 }
 
 // computeSubSample computes a single PolyBLEP-corrected 2x oversampled sample.
-func (g *PolyBLEPSquareGenerator) computeSubSample(p, dt float64) float64 {
+func (g *PolyBLEPSquareGenerator) computeSubSample(p, dt, invDt float64) float64 {
 	// Transition 0: rising edge at p = 0 (jump from -1 to +1: +2)
 	d0 := p
 	if d0 >= 0.5 {
 		d0 -= 1.0
 	}
-	u0 := d0 / dt
+	u0 := d0 * invDt
 	b0 := PolyBLEP4(u0)
 
 	// Transition 1: falling edge at p = 0.5 (jump from +1 to -1: -2)
@@ -102,7 +105,7 @@ func (g *PolyBLEPSquareGenerator) computeSubSample(p, dt float64) float64 {
 	} else if d1 >= 0.5 {
 		d1 -= 1.0
 	}
-	u1 := d1 / dt
+	u1 := d1 * invDt
 	b1 := PolyBLEP4(u1)
 
 	// Naive bipolar square wave (-1.0 or +1.0)
@@ -120,11 +123,12 @@ func (g *PolyBLEPSquareGenerator) Render(dst []float64) {
 	amp := g.amplitude
 	dc := g.dcOffset
 	dt := g.phaseStep
+	invDt := g.invStep
 	p := g.phase
 
 	for i := 0; i < len(dst); i++ {
 		// Sub-step 1: compute first oversampled sample and push into decimator
-		s1 := g.computeSubSample(p, dt)
+		s1 := g.computeSubSample(p, dt, invDt)
 		g.decimator.PushSample(s1)
 		p += dt
 		if p >= 1.0 {
@@ -132,7 +136,7 @@ func (g *PolyBLEPSquareGenerator) Render(dst []float64) {
 		}
 
 		// Sub-step 2: compute second oversampled sample, push, and decimate
-		s2 := g.computeSubSample(p, dt)
+		s2 := g.computeSubSample(p, dt, invDt)
 		g.decimator.PushSample(s2)
 		p += dt
 		if p >= 1.0 {

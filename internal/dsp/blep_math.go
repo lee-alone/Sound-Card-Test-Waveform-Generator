@@ -91,7 +91,11 @@ func PolyBLAMP4Continuous(u float64) float64 {
 // HalfbandDecimator47 implements a symmetric 47-tap halfband FIR decimation filter (2:1).
 // Provides >85dB stopband attenuation and operates with zero heap allocations during streaming.
 type HalfbandDecimator47 struct {
-	history [47]float64
+	// history is a power-of-two ring buffer. head is the next write index.
+	// Keeping 47 active taps in a 64-slot buffer removes all delay-line
+	// shifting while retaining the original filter response.
+	history [64]float64
+	head    uint8
 }
 
 // Halfband taps (symmetric, zero on odd taps except center tap 23)
@@ -117,33 +121,35 @@ func (d *HalfbandDecimator47) Reset() {
 	for i := range d.history {
 		d.history[i] = 0.0
 	}
+	d.head = 0
 }
 
 // PushSample pushes one sample into the delay line.
 func (d *HalfbandDecimator47) PushSample(x float64) {
-	for i := len(d.history) - 1; i > 0; i-- {
-		d.history[i] = d.history[i-1]
-	}
-	d.history[0] = x
+	d.history[d.head&63] = x
+	d.head = (d.head + 1) & 63
 }
 
 // FilterCurrent computes the filtered sample at the current delay line state.
 func (d *HalfbandDecimator47) FilterCurrent() float64 {
 	h := &d.history
-	sum := h[23] * halfband47CenterTap
+	// head is the next write position. The oldest tap (tap 0) therefore
+	// starts 47 samples behind head; (-47 mod 64) == 17.
+	base := int((d.head + 17) & 63)
+	sum := h[(base+23)&63] * halfband47CenterTap
 
-	sum += halfband47TapsEven[0] * (h[0] + h[46])
-	sum += halfband47TapsEven[1] * (h[2] + h[44])
-	sum += halfband47TapsEven[2] * (h[4] + h[42])
-	sum += halfband47TapsEven[3] * (h[6] + h[40])
-	sum += halfband47TapsEven[4] * (h[8] + h[38])
-	sum += halfband47TapsEven[5] * (h[10] + h[36])
-	sum += halfband47TapsEven[6] * (h[12] + h[34])
-	sum += halfband47TapsEven[7] * (h[14] + h[32])
-	sum += halfband47TapsEven[8] * (h[16] + h[30])
-	sum += halfband47TapsEven[9] * (h[18] + h[28])
-	sum += halfband47TapsEven[10] * (h[20] + h[26])
-	sum += halfband47TapsEven[11] * (h[22] + h[24])
+	sum += halfband47TapsEven[0] * (h[base] + h[(base+46)&63])
+	sum += halfband47TapsEven[1] * (h[(base+2)&63] + h[(base+44)&63])
+	sum += halfband47TapsEven[2] * (h[(base+4)&63] + h[(base+42)&63])
+	sum += halfband47TapsEven[3] * (h[(base+6)&63] + h[(base+40)&63])
+	sum += halfband47TapsEven[4] * (h[(base+8)&63] + h[(base+38)&63])
+	sum += halfband47TapsEven[5] * (h[(base+10)&63] + h[(base+36)&63])
+	sum += halfband47TapsEven[6] * (h[(base+12)&63] + h[(base+34)&63])
+	sum += halfband47TapsEven[7] * (h[(base+14)&63] + h[(base+32)&63])
+	sum += halfband47TapsEven[8] * (h[(base+16)&63] + h[(base+30)&63])
+	sum += halfband47TapsEven[9] * (h[(base+18)&63] + h[(base+28)&63])
+	sum += halfband47TapsEven[10] * (h[(base+20)&63] + h[(base+26)&63])
+	sum += halfband47TapsEven[11] * (h[(base+22)&63] + h[(base+24)&63])
 
 	return sum
 }

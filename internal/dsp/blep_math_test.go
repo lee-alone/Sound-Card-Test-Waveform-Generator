@@ -74,3 +74,36 @@ func TestHalfbandDecimator47ZeroAlloc(t *testing.T) {
 		t.Errorf("expected 0 allocs, got %v", allocs)
 	}
 }
+
+func TestHalfbandDecimator47RingBufferMatchesShiftingReference(t *testing.T) {
+	var decimator HalfbandDecimator47
+	decimator.Reset()
+
+	var reference [47]float64
+	for i := 0; i < 256; i++ {
+		x := math.Sin(float64(i)*0.137) + 0.25*math.Cos(float64(i)*0.031)
+
+		decimator.PushSample(x)
+		copy(reference[1:], reference[:len(reference)-1])
+		reference[0] = x
+
+		want := reference[23] * halfband47CenterTap
+		want += halfband47TapsEven[0] * (reference[0] + reference[46])
+		want += halfband47TapsEven[1] * (reference[2] + reference[44])
+		want += halfband47TapsEven[2] * (reference[4] + reference[42])
+		want += halfband47TapsEven[3] * (reference[6] + reference[40])
+		want += halfband47TapsEven[4] * (reference[8] + reference[38])
+		want += halfband47TapsEven[5] * (reference[10] + reference[36])
+		want += halfband47TapsEven[6] * (reference[12] + reference[34])
+		want += halfband47TapsEven[7] * (reference[14] + reference[32])
+		want += halfband47TapsEven[8] * (reference[16] + reference[30])
+		want += halfband47TapsEven[9] * (reference[18] + reference[28])
+		want += halfband47TapsEven[10] * (reference[20] + reference[26])
+		want += halfband47TapsEven[11] * (reference[22] + reference[24])
+
+		got := decimator.FilterCurrent()
+		if got != want {
+			t.Fatalf("sample %d: ring output %v != reference %v", i, got, want)
+		}
+	}
+}

@@ -49,18 +49,7 @@ func Interleave(dst []byte, channels [][]float64, fmt audio.AudioFormat, allowSa
 						s = -1.0
 					}
 				}
-				var v int32
-				if s >= 0 {
-					v = int32(math.Round(s * maxInt16))
-					if v > 32767 {
-						v = 32767
-					}
-				} else {
-					v = int32(math.Round(s * (-minInt16)))
-					if v < -32768 {
-						v = -32768
-					}
-				}
+				v := roundAudioSample16(s)
 				dst[offset] = byte(v)
 				dst[offset+1] = byte(v >> 8)
 				offset += 2
@@ -82,18 +71,7 @@ func Interleave(dst []byte, channels [][]float64, fmt audio.AudioFormat, allowSa
 						s = -1.0
 					}
 				}
-				var v int32
-				if s >= 0 {
-					v = int32(math.Round(s * maxInt24))
-					if v > 8388607 {
-						v = 8388607
-					}
-				} else {
-					v = int32(math.Round(s * (-minInt24)))
-					if v < -8388608 {
-						v = -8388608
-					}
-				}
+				v := roundAudioSample24(s)
 				dst[offset] = byte(v)
 				dst[offset+1] = byte(v >> 8)
 				dst[offset+2] = byte(v >> 16)
@@ -102,6 +80,43 @@ func Interleave(dst []byte, channels [][]float64, fmt audio.AudioFormat, allowSa
 		}
 
 	case audio.SampleFormat24In32:
+		// Stereo is the dominant real-time layout. Hoist both channel slices and
+		// emit one little-endian word per sample instead of indexing channels and
+		// storing four bytes inside the inner loop.
+		if numChannels == 2 {
+			left := channels[0]
+			right := channels[1]
+			offset := 0
+			for f := 0; f < numFrames; f++ {
+				sLeft := left[f]
+				if math.Abs(sLeft) > 1.0+floatTolerance {
+					if !allowSaturation {
+						return ErrPeakExceedsFullScale
+					}
+					if sLeft > 1.0 {
+						sLeft = 1.0
+					} else if sLeft < -1.0 {
+						sLeft = -1.0
+					}
+				}
+				sRight := right[f]
+				if math.Abs(sRight) > 1.0+floatTolerance {
+					if !allowSaturation {
+						return ErrPeakExceedsFullScale
+					}
+					if sRight > 1.0 {
+						sRight = 1.0
+					} else if sRight < -1.0 {
+						sRight = -1.0
+					}
+				}
+				binary.LittleEndian.PutUint32(dst[offset:offset+4], uint32(roundAudioSample24(sLeft))<<8)
+				binary.LittleEndian.PutUint32(dst[offset+4:offset+8], uint32(roundAudioSample24(sRight))<<8)
+				offset += 8
+			}
+			return nil
+		}
+
 		offset := 0
 		for f := 0; f < numFrames; f++ {
 			for ch := 0; ch < numChannels; ch++ {
@@ -116,23 +131,8 @@ func Interleave(dst []byte, channels [][]float64, fmt audio.AudioFormat, allowSa
 						s = -1.0
 					}
 				}
-				var v int32
-				if s >= 0 {
-					v = int32(math.Round(s * maxInt24))
-					if v > 8388607 {
-						v = 8388607
-					}
-				} else {
-					v = int32(math.Round(s * (-minInt24)))
-					if v < -8388608 {
-						v = -8388608
-					}
-				}
-				v32 := uint32(v) << 8
-				dst[offset] = byte(v32)
-				dst[offset+1] = byte(v32 >> 8)
-				dst[offset+2] = byte(v32 >> 16)
-				dst[offset+3] = byte(v32 >> 24)
+				v32 := uint32(roundAudioSample24(s)) << 8
+				binary.LittleEndian.PutUint32(dst[offset:offset+4], v32)
 				offset += 4
 			}
 		}

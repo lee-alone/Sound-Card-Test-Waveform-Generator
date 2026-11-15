@@ -356,3 +356,64 @@ func TestAsioControlChangesAreRejectedWithoutStoppingNativeDSD(t *testing.T) {
 		t.Fatalf("Native DSD state was lost after rejected control changes")
 	}
 }
+
+func TestCombo384DoPUsesInt32LSBPCMCarrier(t *testing.T) {
+	ctrl, driver := setupAsioController(t, bridge.ProfileCombo384)
+	ctrl.DoPGuard().ConfirmViaFlag(true)
+
+	req := DoPRequest{
+		DSDFormat:    dsd.DSD64,
+		SampleFormat: audio.SampleFormat24In32,
+		Channels:     2,
+		BitOrder:     dsd.BitOrderMSBFirst,
+	}
+	if err := ctrl.ConfigureDoP(req); err != nil {
+		t.Fatalf("configure Combo384 DoP failed: %v", err)
+	}
+	status, err := ctrl.AsioService().GetStatus()
+	if err != nil {
+		t.Fatalf("get ASIO status failed: %v", err)
+	}
+	if status.SampleType != "ASIOSTInt32LSB" {
+		t.Fatalf("Combo384 DoP must use PCM sample type ASIOSTInt32LSB, got %q", status.SampleType)
+	}
+	if ctrl.IsNativeDSDActive() {
+		t.Fatalf("DoP path must not activate Native DSD")
+	}
+
+	if err := ctrl.StartPlayback(); err != nil {
+		t.Fatalf("start Combo384 DoP failed: %v", err)
+	}
+	defer func() { _ = ctrl.StopPlayback() }()
+
+	var buf []byte
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && len(buf) < 16 {
+		for idx := 0; idx < 2; idx++ {
+			candidate := driver.WrittenPCMBuffer(idx)
+			if len(candidate) >= 16 && candidate[3] == dsd.DoPMarker05 {
+				buf = candidate
+				break
+			}
+		}
+		if len(buf) < 16 {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if len(buf) < 16 {
+		t.Fatal("Combo384 DoP buffer was not written with an initial 0x05 marker")
+	}
+
+	for frame := 0; frame < 32 && frame*8+8 <= len(buf); frame++ {
+		want := dsd.DoPMarker05
+		if frame%2 == 1 {
+			want = dsd.DoPMarkerFA
+		}
+		for ch := 0; ch < 2; ch++ {
+			got := buf[frame*8+ch*4+3]
+			if got != want {
+				t.Fatalf("frame %d channel %d marker = 0x%02X, want 0x%02X", frame, ch, got, want)
+			}
+		}
+	}
+}

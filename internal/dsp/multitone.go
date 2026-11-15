@@ -53,7 +53,13 @@ type toneState struct {
 	phase     float64
 	phaseStep float64
 	initPhase float64
+	sinStep   float64
+	cosStep   float64
 }
+
+// multitoneRenormalizeInterval bounds oscillator drift while keeping hot-path
+// transcendental calls to roughly two per 1024 samples per tone.
+const multitoneRenormalizeInterval = 1024
 
 // MultitoneGenerator generates two-tone (SMPTE/CCIF/DIN) and multi-tone signals with
 // analytical Crest Factor / PAPR calculation, automatic peak normalization to strictly prevent
@@ -82,10 +88,10 @@ func NewMultitoneGenerator() *MultitoneGenerator {
 // NewSMPTEConfig returns a standard SMPTE intermodulation configuration (60Hz + 7kHz, 4:1).
 func NewSMPTEConfig(sampleRate int, targetPeak, dcOffset float64) MultitoneConfig {
 	return MultitoneConfig{
-		SampleRate: sampleRate,
-		TargetPeak: targetPeak,
-		DCOffset:   dcOffset,
-		Preset:     MultitonePresetSMPTE,
+		SampleRate:   sampleRate,
+		TargetPeak:   targetPeak,
+		DCOffset:     dcOffset,
+		Preset:       MultitonePresetSMPTE,
 		AutoNormPAPR: true,
 		Components: []ToneComponent{
 			{Frequency: 60.0, Amplitude: 0.8, InitialPhase: 0.0},
@@ -97,10 +103,10 @@ func NewSMPTEConfig(sampleRate int, targetPeak, dcOffset float64) MultitoneConfi
 // NewCCIFConfig returns a standard CCIF intermodulation configuration (19kHz + 20kHz, 1:1).
 func NewCCIFConfig(sampleRate int, targetPeak, dcOffset float64) MultitoneConfig {
 	return MultitoneConfig{
-		SampleRate: sampleRate,
-		TargetPeak: targetPeak,
-		DCOffset:   dcOffset,
-		Preset:     MultitonePresetCCIF,
+		SampleRate:   sampleRate,
+		TargetPeak:   targetPeak,
+		DCOffset:     dcOffset,
+		Preset:       MultitonePresetCCIF,
 		AutoNormPAPR: true,
 		Components: []ToneComponent{
 			{Frequency: 19000.0, Amplitude: 0.5, InitialPhase: 0.0},
@@ -112,10 +118,10 @@ func NewCCIFConfig(sampleRate int, targetPeak, dcOffset float64) MultitoneConfig
 // NewDINConfig returns a standard DIN intermodulation configuration (250Hz + 8kHz, 4:1).
 func NewDINConfig(sampleRate int, targetPeak, dcOffset float64) MultitoneConfig {
 	return MultitoneConfig{
-		SampleRate: sampleRate,
-		TargetPeak: targetPeak,
-		DCOffset:   dcOffset,
-		Preset:     MultitonePresetDIN,
+		SampleRate:   sampleRate,
+		TargetPeak:   targetPeak,
+		DCOffset:     dcOffset,
+		Preset:       MultitonePresetDIN,
 		AutoNormPAPR: true,
 		Components: []ToneComponent{
 			{Frequency: 250.0, Amplitude: 0.8, InitialPhase: 0.0},
@@ -197,11 +203,15 @@ func (g *MultitoneGenerator) PrepareMultitone(cfg MultitoneConfig) error {
 			normInit += twoPi
 		}
 
+		phaseStep := (twoPi * c.Frequency) / g.sampleRate
+		sinStep, cosStep := math.Sincos(phaseStep)
 		g.tones[i] = toneState{
 			amplitude: scaledAmp,
 			phase:     normInit,
-			phaseStep: (twoPi * c.Frequency) / g.sampleRate,
+			phaseStep: phaseStep,
 			initPhase: normInit,
+			sinStep:   sinStep,
+			cosStep:   cosStep,
 		}
 
 		scaledSumAmps += scaledAmp
@@ -244,21 +254,38 @@ func (g *MultitoneGenerator) Render(dst []float64) {
 		dst[i] = dc
 	}
 
-	// Accumulate each tone component across all destination samples
+	// Accumulate each tone component across all destination samples. A complex
+	// rotation advances sin/cos with four multiplies and two adds per sample;
+	// exact trigonometric values are restored periodically to bound drift.
 	for t := 0; t < nTones; t++ {
 		tone := &g.tones[t]
 		amp := tone.amplitude
 		step := tone.phaseStep
 		p := tone.phase
+		sinStep := tone.sinStep
+		cosStep := tone.cosStep
+		sinPhase, cosPhase := math.Sincos(p)
+		untilRenormalize := multitoneRenormalizeInterval
 
 		for i := 0; i < len(dst); i++ {
-			dst[i] += amp * math.Sin(p)
+			dst[i] += amp * sinPhase
+
+			nextSin := sinPhase*cosStep + cosPhase*sinStep
+			nextCos := cosPhase*cosStep - sinPhase*sinStep
+			sinPhase, cosPhase = nextSin, nextCos
+
 			p += step
 			if p >= twoPi {
 				p -= twoPi
 				if p >= twoPi {
 					p = math.Mod(p, twoPi)
 				}
+			}
+
+			untilRenormalize--
+			if untilRenormalize == 0 {
+				sinPhase, cosPhase = math.Sincos(p)
+				untilRenormalize = multitoneRenormalizeInterval
 			}
 		}
 

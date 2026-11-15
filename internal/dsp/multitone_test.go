@@ -138,3 +138,39 @@ func TestMultitoneNyquistGuard(t *testing.T) {
 		t.Errorf("expected error for frequency exceeding safe Nyquist limit, got nil")
 	}
 }
+
+func TestMultitoneOscillatorRecurrenceAccuracy(t *testing.T) {
+	cfg := NewCCIFConfig(192000, 1.0, 0.0)
+	gen := NewMultitoneGenerator()
+	if err := gen.PrepareMultitone(cfg); err != nil {
+		t.Fatalf("PrepareMultitone failed: %v", err)
+	}
+
+	const n = 4096
+	got := make([]float64, n)
+	gen.Render(got)
+
+	phases := make([]float64, len(cfg.Components))
+	steps := make([]float64, len(cfg.Components))
+	for i, c := range cfg.Components {
+		phases[i] = math.Mod(c.InitialPhase, twoPi)
+		if phases[i] < 0 {
+			phases[i] += twoPi
+		}
+		steps[i] = twoPi * c.Frequency / float64(cfg.SampleRate)
+	}
+
+	for i := 0; i < n; i++ {
+		want := cfg.DCOffset
+		for j, c := range cfg.Components {
+			want += c.Amplitude * gen.ScaleFactor() * math.Sin(phases[j])
+			phases[j] += steps[j]
+			if phases[j] >= twoPi {
+				phases[j] -= twoPi
+			}
+		}
+		if diff := math.Abs(got[i] - want); diff > 1e-12 {
+			t.Fatalf("sample %d: error %g, got %g want %g", i, diff, got[i], want)
+		}
+	}
+}

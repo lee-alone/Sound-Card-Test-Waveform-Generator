@@ -7,6 +7,7 @@ import (
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/dsd"
 	"sound-signal-generator/internal/engine"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 // Supported sample rate candidates for manual selection
@@ -53,13 +54,13 @@ var SampleFormatLabels = []string{
 // transports it through the dCS DoP v1.1 container.
 type DoPFormatOption struct {
 	Format      dsd.DSDFormat
-	Label       string
+	LabelKey    string
 	CarrierRate int
 }
 
 var DoPFormatOptions = []DoPFormatOption{
-	{Format: dsd.DSD64, Label: "DSD64 · 176.4 kHz 载波", CarrierRate: 176400},
-	{Format: dsd.DSD128, Label: "DSD128 · 352.8 kHz 载波", CarrierRate: 352800},
+	{Format: dsd.DSD64, LabelKey: "dop.format.dsd64", CarrierRate: 176400},
+	{Format: dsd.DSD128, LabelKey: "dop.format.dsd128", CarrierRate: 352800},
 }
 
 var DoPBitOrderOptions = []dsd.BitOrder{
@@ -67,9 +68,9 @@ var DoPBitOrderOptions = []dsd.BitOrder{
 	dsd.BitOrderLSBFirst,
 }
 
-var DoPBitOrderLabels = []string{
-	"MSB First · 标准 DSD 位序",
-	"LSB First · 兼容特定硬件",
+var DoPBitOrderLabelKeys = []string{
+	"dop.bit_order.msb",
+	"dop.bit_order.lsb",
 }
 
 // NativeDSDFormatOptions are the direct ASIO 1-bit formats exposed by the
@@ -84,22 +85,70 @@ var NativeDSDFormatLabels = []string{
 
 // WaveformOption defines waveform metadata for UI selection
 type WaveformOption struct {
-	ID    controller.WaveformType
-	Label string
+	ID       controller.WaveformType
+	LabelKey string
 }
 
 // Concise waveform labels without oversized technical paragraphs
 var WaveformOptions = []WaveformOption{
-	{ID: controller.WaveformSine, Label: "正弦波 (Pure Sine)"},
-	{ID: controller.WaveformPolyBlepSquare, Label: "方波 (Square PolyBLEP)"},
-	{ID: controller.WaveformPolyBlepTriangle, Label: "三角波 (Triangle PolyBLEP)"},
-	{ID: controller.WaveformLinearSweep, Label: "线性扫频 (Linear Chirp)"},
-	{ID: controller.WaveformLogarithmicSweep, Label: "对数扫频 (Log Sweep)"},
-	{ID: controller.WaveformWhiteNoise, Label: "高斯白噪声 (White Noise)"},
-	{ID: controller.WaveformPinkNoise, Label: "粉红噪声 (Pink Noise)"},
-	{ID: controller.WaveformMultitoneSMPTE, Label: "SMPTE 互调 (60Hz+7kHz)"},
-	{ID: controller.WaveformMultitoneCCIF, Label: "CCIF 互调 (19kHz+20kHz)"},
-	{ID: controller.WaveformDoP, Label: "dCS DoP 载波 (DSD over PCM)"},
+	{ID: controller.WaveformSine, LabelKey: "wave.sine"},
+	{ID: controller.WaveformPolyBlepSquare, LabelKey: "wave.square"},
+	{ID: controller.WaveformPolyBlepTriangle, LabelKey: "wave.triangle"},
+	{ID: controller.WaveformLinearSweep, LabelKey: "wave.linear"},
+	{ID: controller.WaveformLogarithmicSweep, LabelKey: "wave.log"},
+	{ID: controller.WaveformWhiteNoise, LabelKey: "wave.white"},
+	{ID: controller.WaveformPinkNoise, LabelKey: "wave.pink"},
+	{ID: controller.WaveformMultitoneSMPTE, LabelKey: "wave.smpte"},
+	{ID: controller.WaveformMultitoneCCIF, LabelKey: "wave.ccif"},
+	{ID: controller.WaveformDoP, LabelKey: "wave.dop"},
+}
+
+func WaveformLabelAt(index int) string {
+	idx := clampIndex(int32(index), len(WaveformOptions))
+	if len(WaveformOptions) == 0 {
+		return ""
+	}
+	return i18n.T(WaveformOptions[idx].LabelKey)
+}
+
+func WaveformLabels() []string {
+	labels := make([]string, len(WaveformOptions))
+	for i, option := range WaveformOptions {
+		labels[i] = i18n.T(option.LabelKey)
+	}
+	return labels
+}
+
+func DoPFormatLabelAt(index int) string {
+	idx := clampIndex(int32(index), len(DoPFormatOptions))
+	if len(DoPFormatOptions) == 0 {
+		return ""
+	}
+	return i18n.T(DoPFormatOptions[idx].LabelKey)
+}
+
+func DoPFormatLabels() []string {
+	labels := make([]string, len(DoPFormatOptions))
+	for i, option := range DoPFormatOptions {
+		labels[i] = i18n.T(option.LabelKey)
+	}
+	return labels
+}
+
+func DoPBitOrderLabelAt(index int) string {
+	idx := clampIndex(int32(index), len(DoPBitOrderLabelKeys))
+	if len(DoPBitOrderLabelKeys) == 0 {
+		return ""
+	}
+	return i18n.T(DoPBitOrderLabelKeys[idx])
+}
+
+func DoPBitOrderLabels() []string {
+	labels := make([]string, len(DoPBitOrderLabelKeys))
+	for i, key := range DoPBitOrderLabelKeys {
+		labels[i] = i18n.T(key)
+	}
+	return labels
 }
 
 // ChannelMode represents stereo routing and differential phase mode
@@ -113,12 +162,28 @@ const (
 	ChannelModeSoloR                      // Solo Right (Mute Left)
 )
 
-var ChannelModeLabels = []string{
-	"立体声 (Normal Stereo)",
-	"差分测试 (Invert R 180°)",
-	"同相单声道 (Mono Sum)",
-	"左声道单通 (Solo Left)",
-	"右声道单通 (Solo Right)",
+var ChannelModeLabelKeys = []string{
+	"channel.stereo",
+	"channel.invert_r",
+	"channel.mono",
+	"channel.solo_l",
+	"channel.solo_r",
+}
+
+func ChannelModeLabelAt(index int) string {
+	idx := clampIndex(int32(index), len(ChannelModeLabelKeys))
+	if len(ChannelModeLabelKeys) == 0 {
+		return ""
+	}
+	return i18n.T(ChannelModeLabelKeys[idx])
+}
+
+func ChannelModeLabels() []string {
+	labels := make([]string, len(ChannelModeLabelKeys))
+	for i, key := range ChannelModeLabelKeys {
+		labels[i] = i18n.T(key)
+	}
+	return labels
 }
 
 // UIState encapsulates the GUI mutable state across loop renders.
@@ -172,6 +237,9 @@ type UIState struct {
 	ShowProbeResults bool
 	IsProbing        bool
 
+	// Interface language selector index (0 = English, 1 = Simplified Chinese).
+	SelectedLanguageIndex int32
+
 	// Generic risk confirmation state used by square, multitone and ultrasound
 	// signals. DoP and Native DSD retain their dedicated higher-friction flows.
 	ShowSafetyConfirm    bool
@@ -184,13 +252,17 @@ type UIState struct {
 	StatusMessage   string
 	ErrorMessage    string
 	StreamStartTime time.Time
+	// SignalStartTime marks sample zero of the currently installed DSP source.
+	// It is deliberately separate from StreamStartTime: live waveform and sweep
+	// edits replace the generator without restarting the audio stream.
+	SignalStartTime time.Time
 	IsActiveStream  bool
 }
 
 // NewUIState initializes a default UIState matching instrument standards.
 func NewUIState() *UIState {
 	return &UIState{
-		DeviceNames:               []string{"正在扫描硬件设备..."},
+		DeviceNames:               []string{i18n.T("device.scanning")},
 		DeviceIDs:                 []string{""},
 		DeviceBackends:            []audio.BackendType{""},
 		SelectedDeviceIndex:       0,
@@ -215,7 +287,8 @@ func NewUIState() *UIState {
 		NativeDSDFormatIndex:      0, // DSD256
 		AsioBufferSize:            512,
 		ShowProbeResults:          false,
-		StatusMessage:             "系统就绪 (STANDBY) - 失败即静音保护就绪",
+		StatusMessage:             i18n.T("status.ready"),
+		SelectedLanguageIndex:     int32(i18n.Index(i18n.Current())),
 	}
 }
 
@@ -279,7 +352,7 @@ func (s *UIState) SelectedDoPFormat() dsd.DSDFormat {
 
 // SelectedDoPBitOrder returns the validated bit order currently selected.
 func (s *UIState) SelectedDoPBitOrder() dsd.BitOrder {
-	index := clampIndex(s.DoPBitOrderIndex, len(DoPBitOrderLabels))
+	index := clampIndex(s.DoPBitOrderIndex, len(DoPBitOrderLabelKeys))
 	return DoPBitOrderOptions[index]
 }
 

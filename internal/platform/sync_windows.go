@@ -11,10 +11,13 @@ import (
 )
 
 var (
-	modAvrt                        = windows.NewLazySystemDLL("avrt.dll")
-	procAvSetMmThreadCharacteristicsW = modAvrt.NewProc("AvSetMmThreadCharacteristicsW")
+	modAvrt                             = windows.NewLazySystemDLL("avrt.dll")
+	procAvSetMmThreadCharacteristicsW   = modAvrt.NewProc("AvSetMmThreadCharacteristicsW")
+	procAvSetMmThreadPriority           = modAvrt.NewProc("AvSetMmThreadPriority")
 	procAvRevertMmThreadCharacteristics = modAvrt.NewProc("AvRevertMmThreadCharacteristics")
 )
+
+const avrtPriorityCritical = 2
 
 // WaitForWaitHandle waits for a Windows event handle up to timeout.
 // Returns (true, nil) if signaled, (false, nil) if timed out.
@@ -70,6 +73,11 @@ func EnableRealtimeAudioPriority() (revert func(), err error) {
 	}
 
 	handle := r0
+	if result, _, callErr := procAvSetMmThreadPriority.Call(handle, avrtPriorityCritical); result == 0 {
+		_, _, _ = procAvRevertMmThreadCharacteristics.Call(handle)
+		return func() {}, fmt.Errorf("AvSetMmThreadPriority failed: %v", callErr)
+	}
+
 	return func() {
 		_, _, _ = procAvRevertMmThreadCharacteristics.Call(handle)
 	}, nil

@@ -472,7 +472,14 @@ func (s *AsioService) ActiveDevice() audio.Device {
 }
 
 func parseNativeDSDFormat(formatStr string) (dsd.DSDFormat, error) {
-	switch strings.ToUpper(strings.TrimSpace(formatStr)) {
+	clean := strings.ToUpper(strings.TrimSpace(formatStr))
+	// UI/status values may include a trailing rate or explanatory text, e.g.
+	// "DSD256 (11.2896MHz)" or "DSD256 · 11.2896 MHz". Only the stable protocol
+	// token is significant here.
+	if end := strings.IndexAny(clean, " \t(·"); end >= 0 {
+		clean = clean[:end]
+	}
+	switch clean {
 	case "DSD64", "64":
 		return dsd.DSD64, nil
 	case "DSD128", "128":

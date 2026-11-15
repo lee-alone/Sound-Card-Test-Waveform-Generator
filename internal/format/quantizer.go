@@ -18,6 +18,23 @@ const (
 	minInt32From24 = -8388608.0 * 256.0
 )
 
+// roundAudioSample16 and roundAudioSample24 implement round-half-away-from-zero
+// for already range-checked audio samples. Integer truncation avoids the generic
+// math.Round special-case handling in the real-time quantization paths.
+func roundAudioSample16(s float64) int32 {
+	if s >= 0 {
+		return int32(s*maxInt16 + 0.5)
+	}
+	return int32(s*(-minInt16) - 0.5)
+}
+
+func roundAudioSample24(s float64) int32 {
+	if s >= 0 {
+		return int32(s*maxInt24 + 0.5)
+	}
+	return int32(s*(-minInt24) - 0.5)
+}
+
 // Quantize16Int converts float64 samples to little-endian 16-bit signed integers.
 func Quantize16Int(dst []byte, src []float64, allowSaturation bool) error {
 	needed := len(src) * 2
@@ -37,18 +54,7 @@ func Quantize16Int(dst []byte, src []float64, allowSaturation bool) error {
 			}
 		}
 
-		var v int32
-		if s >= 0 {
-			v = int32(math.Round(s * maxInt16))
-			if v > 32767 {
-				v = 32767
-			}
-		} else {
-			v = int32(math.Round(s * (-minInt16)))
-			if v < -32768 {
-				v = -32768
-			}
-		}
+		v := roundAudioSample16(s)
 
 		idx := i * 2
 		dst[idx] = byte(v)
@@ -77,18 +83,7 @@ func Quantize24Packed(dst []byte, src []float64, allowSaturation bool) error {
 			}
 		}
 
-		var v int32
-		if s >= 0 {
-			v = int32(math.Round(s * maxInt24))
-			if v > 8388607 {
-				v = 8388607
-			}
-		} else {
-			v = int32(math.Round(s * (-minInt24)))
-			if v < -8388608 {
-				v = -8388608
-			}
-		}
+		v := roundAudioSample24(s)
 
 		idx := i * 3
 		dst[idx] = byte(v)
@@ -119,27 +114,11 @@ func Quantize24In32(dst []byte, src []float64, allowSaturation bool) error {
 			}
 		}
 
-		var v int32
-		if s >= 0 {
-			v = int32(math.Round(s * maxInt24))
-			if v > 8388607 {
-				v = 8388607
-			}
-		} else {
-			v = int32(math.Round(s * (-minInt24)))
-			if v < -8388608 {
-				v = -8388608
-			}
-		}
+		v := roundAudioSample24(s)
 
-		// Shift left by 8 bits for 24-valid-in-32 left alignment
+		// Shift left by 8 bits for 24-valid-in-32 left alignment.
 		v32 := uint32(v) << 8
-
-		idx := i * 4
-		dst[idx] = byte(v32)         // 0x00 padding
-		dst[idx+1] = byte(v32 >> 8)  // low
-		dst[idx+2] = byte(v32 >> 16) // mid
-		dst[idx+3] = byte(v32 >> 24) // high (sign)
+		binary.LittleEndian.PutUint32(dst[i*4:(i+1)*4], v32)
 	}
 
 	return nil

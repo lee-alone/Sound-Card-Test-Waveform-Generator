@@ -199,3 +199,26 @@ func TestAsioServiceUnsupportedNativeFormatStaysInPCM(t *testing.T) {
 		t.Fatalf("no NativeDSDStream may remain after unsupported selection")
 	}
 }
+
+func TestParseNativeDSDFormatAcceptsUIAndProtocolLabels(t *testing.T) {
+	tests := map[string]string{
+		"DSD64":                  "DSD64",
+		"dsd128":                 "DSD128",
+		"256":                    "DSD256",
+		"DSD256 (11.2896MHz)":    "DSD256",
+		"DSD512 · 22.5792 MHz":   "DSD512",
+		" DSD512\t(22.5792 MHz)": "DSD512",
+	}
+
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			format, err := parseNativeDSDFormat(input)
+			if err != nil {
+				t.Fatalf("parseNativeDSDFormat(%q) failed: %v", input, err)
+			}
+			if got := format.ShortName(); got != want {
+				t.Fatalf("parseNativeDSDFormat(%q) = %s, want %s", input, got, want)
+			}
+		})
+	}
+}

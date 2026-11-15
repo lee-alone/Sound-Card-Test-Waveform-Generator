@@ -2,6 +2,7 @@ package giuui
 
 import (
 	g "github.com/AllenDang/giu"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 // TransportBar anchors the two high-consequence controls in one permanent
@@ -34,30 +35,30 @@ func (b *TransportBar) Build(width, height float32) g.Widget {
 
 	statusColor := ColorTextMuted
 	statusBg := ColorSurfaceRaise
-	statusText := "输出静音"
-	detail := "参数可安全调整；开始输出前会重新协商设备格式。"
+	statusText := i18n.T("transport.muted")
+	detail := i18n.T("transport.muted_detail")
 	if nyquistBlocked {
 		statusColor = ColorAlarmRed
 		statusBg = ColorAlarmDark
-		statusText = "频率超限"
-		detail = "当前频率超过采样率安全上限，开始输出已锁定。"
+		statusText = i18n.T("transport.nyquist")
+		detail = i18n.T("transport.nyquist_detail")
 	} else if isRunning {
 		statusColor = ColorPhosphorGreen
 		statusBg = ColorPhosphorDark
-		statusText = "信号输出中"
-		detail = "波形与频率实时生效；采样率和样本格式已锁定。"
+		statusText = i18n.T("transport.running")
+		detail = i18n.T("transport.running_detail")
 	}
 
 	actions := g.Row(
 		StylePrimaryButton(
-			g.Button("开始输出").
+			g.Button(i18n.T("transport.start")).
 				Size(px(190), px(38)).
 				Disabled(nyquistBlocked || isRunning).
 				OnClick(b.onStart),
 		),
 		g.Spacing(),
 		StyleDangerButton(
-			g.Button("停止并静音").
+			g.Button(i18n.T("transport.stop_mute")).
 				Size(px(190), px(38)).
 				OnClick(b.onStop),
 		),

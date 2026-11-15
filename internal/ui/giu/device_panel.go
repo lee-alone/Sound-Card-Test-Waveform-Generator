@@ -8,6 +8,7 @@ import (
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/audio"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 // DevicePanel owns hardware selection, exclusive-mode policy, output format
@@ -32,7 +33,7 @@ func NewDevicePanel(uiService *controller.UIService, state *UIState, onFormatCha
 func (p *DevicePanel) RefreshDevices() {
 	devices, err := p.uiService.GetDevices()
 	if err != nil {
-		p.state.ErrorMessage = fmt.Sprintf("获取音频设备失败: %v", err)
+		p.state.ErrorMessage = i18n.T("device.error.enumerate_fmt", err)
 		return
 	}
 
@@ -44,7 +45,7 @@ func (p *DevicePanel) RefreshDevices() {
 	for _, dev := range devices {
 		displayName := dev.Name
 		if dev.IsDefault {
-			displayName += "  [默认]"
+			displayName += i18n.T("device.default_badge")
 		}
 		if dev.State != audio.StateActive {
 			displayName += fmt.Sprintf("  (%s)", dev.State.String())
@@ -55,7 +56,7 @@ func (p *DevicePanel) RefreshDevices() {
 	}
 
 	if len(names) == 0 {
-		names = []string{"无可用音频输出设备"}
+		names = []string{i18n.T("device.none")}
 		ids = []string{""}
 		backends = []audio.BackendType{""}
 	}
@@ -66,7 +67,7 @@ func (p *DevicePanel) RefreshDevices() {
 	p.state.SelectedDeviceIndex = defaultIdx
 	if int(defaultIdx) < len(ids) && ids[defaultIdx] != "" {
 		if err := p.uiService.SelectDevice(ids[defaultIdx]); err != nil {
-			p.state.ErrorMessage = fmt.Sprintf("选择默认音频设备失败: %v", err)
+			p.state.ErrorMessage = i18n.T("device.error.select_default_fmt", err)
 		} else {
 			p.state.ErrorMessage = ""
 		}
@@ -166,7 +167,7 @@ func (p *DevicePanel) RunProbe() {
 		results, err := p.uiService.ProbeDeviceCapabilities()
 		p.state.IsProbing = false
 		if err != nil {
-			p.state.ErrorMessage = fmt.Sprintf("硬件能力探测失败: %v", err)
+			p.state.ErrorMessage = i18n.T("device.error.probe_fmt", err)
 			g.Update()
 			return
 		}
@@ -183,7 +184,7 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	}
 	streamLocked := p.state.IsOutputRunning()
 
-	currentDevPreview := "未发现设备"
+	currentDevPreview := i18n.T("device.not_found")
 	if int(p.state.SelectedDeviceIndex) >= 0 && int(p.state.SelectedDeviceIndex) < len(p.state.DeviceNames) {
 		currentDevPreview = p.state.DeviceNames[p.state.SelectedDeviceIndex]
 	}
@@ -191,14 +192,14 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	rateIndex := clampIndex(p.state.SelectedSampleRateIndex, len(SampleRateLabels))
 	formatIndex := clampIndex(p.state.SelectedSampleFormatIndex, len(SampleFormatLabels))
 	isDoP := p.state.IsDoPSelected()
-	probeText := "检测支持格式"
+	probeText := i18n.T("device.probe.button")
 	if p.state.IsProbing {
-		probeText = "正在检测格式..."
+		probeText = i18n.T("device.probe.running")
 	}
 
-	exclusiveLabel := "WASAPI 独占模式"
+	exclusiveLabel := i18n.T("device.exclusive.wasapi")
 	if p.state.IsAsioSelected() {
-		exclusiveLabel = "ASIO 独占驱动（固定）"
+		exclusiveLabel = i18n.T("device.exclusive.asio_fixed")
 	}
 	var exclusiveControl g.Widget = g.Checkbox(exclusiveLabel, &p.state.IsExclusive).
 		OnChange(func() {
@@ -210,11 +211,11 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 		Format("%+.1f dB").
 		Size(px(112)).
 		OnChange(p.onFormatChanged)
-	rateCaption := "采样率"
-	formatCaption := "样本格式"
+	rateCaption := i18n.T("device.sample_rate")
+	formatCaption := i18n.T("device.sample_format")
 	if streamLocked {
-		rateCaption += "  ·  输出中已锁定"
-		formatCaption += "  ·  输出中已锁定"
+		rateCaption += i18n.T("device.locked_suffix")
+		formatCaption += i18n.T("device.locked_suffix")
 	}
 	formatControls := []g.Widget{
 		captionLabel(rateCaption),
@@ -232,24 +233,24 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	if isDoP {
 		carrierRate := p.state.SelectedDoPFormat().DoPCarrierSampleRate()
 		exclusiveControl = g.Row(
-			captionLabel("DoP 独占模式"),
+			captionLabel(i18n.T("device.dop.exclusive")),
 			g.Spacing(),
-			StyleBadge("强制启用", ColorDigitalCyanDark, ColorDigitalCyan),
+			StyleBadge(i18n.T("device.dop.forced"), ColorDigitalCyanDark, ColorDigitalCyan),
 		)
-		trimControl = fontLabel("0.0 dBFS · Unity Gain 锁定", 11, ColorTextMuted)
+		trimControl = fontLabel(i18n.T("device.unity_locked"), 11, ColorTextMuted)
 		formatControls = []g.Widget{
-			captionLabel("DoP 载波格式"),
-			lockedParamRow("采样率", fmt.Sprintf("%.1f kHz", float64(carrierRate)/1000.0), contentW),
-			lockedParamRow("容器", "24-in-32 LE", contentW),
-			fontLabel("载波参数由 DSD 规格自动决定，不允许手动修改。", 10.5, ColorTextMuted),
+			captionLabel(i18n.T("device.dop.carrier_format")),
+			lockedParamRow(i18n.T("device.sample_rate"), fmt.Sprintf("%.1f kHz", float64(carrierRate)/1000.0), contentW),
+			lockedParamRow(i18n.T("device.container"), "24-in-32 LE", contentW),
+			fontLabel(i18n.T("device.dop.auto_params"), 10.5, ColorTextMuted),
 		}
 	}
 
 	deviceComboW := contentW - px(82) - px(8)
 	widgets := []g.Widget{
-		sectionHeader("输出设置", ""),
+		sectionHeader(i18n.T("device.output_settings"), ""),
 		g.Separator(),
-		captionLabel("输出设备"),
+		captionLabel(i18n.T("device.output_device")),
 		g.Row(
 			disableWhen(streamLocked,
 				g.Combo("##devCombo", currentDevPreview, p.state.DeviceNames, &p.state.SelectedDeviceIndex).
@@ -262,13 +263,13 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 							p.onFormatChanged()
 						}
 					})),
-			StyleQuietButton(g.Button("刷新").Size(px(82), px(32)).Disabled(streamLocked).OnClick(p.RefreshDevices)),
+			StyleQuietButton(g.Button(i18n.T("device.refresh")).Size(px(82), px(32)).Disabled(streamLocked).OnClick(p.RefreshDevices)),
 		),
 		captionLabel(truncateText(currentDevPreview, 44)),
 		g.Row(
 			exclusiveControl,
 			g.Spacing(),
-			captionLabel("校准微调"),
+			captionLabel(i18n.T("device.calibration_trim")),
 			trimControl,
 		),
 		g.Separator(),
@@ -284,28 +285,28 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 		}
 		sampleType := status.SampleType
 		if sampleType == "" {
-			sampleType = "未协商"
+			sampleType = i18n.T("device.not_negotiated")
 		}
 		clockLabels := make([]string, len(status.ClockSources))
 		for i, clock := range status.ClockSources {
 			clockLabels[i] = fmt.Sprintf("%s #%d", clock.Name, clock.Index)
 		}
 		clockIndex := clampIndex(p.state.SelectedClockIndex, len(clockLabels))
-		clockPreview := "无可用时钟源"
+		clockPreview := i18n.T("device.asio.no_clock")
 		if len(clockLabels) > 0 {
 			clockPreview = clockLabels[clockIndex]
 		}
 
 		widgets = append(widgets,
 			g.Separator(),
-			sectionHeader("ASIO 驱动", "PCM 输出状态"),
+			sectionHeader(i18n.T("device.asio.driver"), i18n.T("device.asio.pcm_status")),
 			g.Row(
 				StyleBadge(mode, ColorDigitalCyanDark, ColorDigitalCyan),
 				g.Spacing(),
 				fontLabel("SampleType: "+sampleType, 10.5, ColorTextMuted),
 			),
-			captionLabel(fmt.Sprintf("缓冲范围 [%d, %d]，当前 %d；驱动 %s", status.BufferSizes.MinSize, status.BufferSizes.MaxSize, status.ActiveBufferSize, status.DriverVersion)),
-			captionLabel("硬件时钟源"),
+			captionLabel(i18n.T("device.asio.buffer_range_fmt", status.BufferSizes.MinSize, status.BufferSizes.MaxSize, status.ActiveBufferSize, status.DriverVersion)),
+			captionLabel(i18n.T("device.asio.clock_source")),
 			disableWhen(streamLocked,
 				g.Combo("##asioClock", clockPreview, clockLabels, &p.state.SelectedClockIndex).
 					Size(contentW).
@@ -317,9 +318,9 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 						}
 					})),
 			g.Row(
-				captionLabel("缓冲帧数"),
+				captionLabel(i18n.T("device.asio.buffer_frames")),
 				disableWhen(streamLocked, g.InputInt(&p.state.AsioBufferSize).Size(px(104)).StepSize(64)),
-				StyleQuietButton(g.Button("应用").Size(px(76), px(30)).Disabled(streamLocked).OnClick(func() {
+				StyleQuietButton(g.Button(i18n.T("device.apply")).Size(px(76), px(30)).Disabled(streamLocked).OnClick(func() {
 					if err := p.uiService.SetAsioBufferSize(int(p.state.AsioBufferSize)); err != nil {
 						p.state.NativeDSDError = err.Error()
 					} else {
@@ -337,17 +338,17 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 			}
 			widgets = append(widgets,
 				g.Separator(),
-				sectionHeader("Native DSD 测试模式", "已显式启用"),
+				sectionHeader(i18n.T("device.native.mode"), i18n.T("device.native.explicitly_enabled")),
 				g.Row(
 					StyleBadge("ACTIVE", ColorAmberDark, ColorAmberWarning),
 					g.Spacing(),
 					fontLabel(nativeFormat, 10.5, ColorTextBright),
 				),
-				captionLabel(fmt.Sprintf("SampleType: %s；1-bit 缓冲 %d 帧", sampleType, status.NativeDSDBufferFrames)),
-				captionLabel("Native DSD 能力探测"),
+				captionLabel(i18n.T("device.native.buffer_fmt", sampleType, status.NativeDSDBufferFrames)),
+				captionLabel(i18n.T("device.native.capabilities")),
 			)
 			for _, capability := range status.NativeCapabilities {
-				label := fmt.Sprintf("%s  [不支持]", capability.Format)
+				label := capability.Format + i18n.T("device.native.unsupported_suffix")
 				color := ColorTextDim
 				if capability.Supported {
 					label = fmt.Sprintf("%s  [%s]", capability.Format, capability.SampleType)
@@ -358,13 +359,13 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 					widgets = append(widgets, captionLabel("  "+truncateText(capability.Reason, 54)))
 				}
 			}
-			widgets = append(widgets, StyleDangerButton(g.Button("关闭 Native DSD · 恢复 PCM").Size(contentW, px(34)).OnClick(func() {
+			widgets = append(widgets, StyleDangerButton(g.Button(i18n.T("device.native.disable")).Size(contentW, px(34)).OnClick(func() {
 				if err := p.uiService.DisableNativeDSD(); err != nil {
 					p.state.NativeDSDError = err.Error()
 				} else {
 					p.state.NativeDSDError = ""
 					p.state.ResetNativeDSDSession()
-					p.state.StatusMessage = "已关闭 Native DSD，PCM 模式已静音恢复"
+					p.state.StatusMessage = i18n.T("device.native.disabled_status")
 					p.onFormatChanged()
 				}
 				p.RefreshAsioStatus()
@@ -372,9 +373,9 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 		} else {
 			widgets = append(widgets,
 				g.Separator(),
-				sectionHeader("Native DSD 测试模式", "默认关闭 · 当前 PCM"),
-				captionLabel("只有主动进入并完成安全确认后，才会显示 Native DSD 专用测试控制。"),
-				StyleDangerButton(g.Button("进入 Native DSD 测试模式…").Size(contentW, px(34)).OnClick(func() {
+				sectionHeader(i18n.T("device.native.mode"), i18n.T("device.native.default_off_pcm")),
+				captionLabel(i18n.T("device.native.hidden_hint")),
+				StyleDangerButton(g.Button(i18n.T("device.native.enter")).Size(contentW, px(34)).OnClick(func() {
 					if p.requestNativeDSDYes != nil {
 						p.requestNativeDSDYes()
 					}
@@ -383,6 +384,9 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 		}
 		if p.state.NativeDSDError != "" {
 			widgets = append(widgets, fontLabel(p.state.NativeDSDError, 10.5, ColorAlarmRed))
+			if strings.Contains(strings.ToUpper(p.state.NativeDSDError), "ASIOSTINT32") {
+				widgets = append(widgets, captionLabel(i18n.T("device.native.combo_hint")))
+			}
 		}
 	}
 
@@ -393,7 +397,7 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 			g.Spacing(),
 			func() g.Widget {
 				if p.state.ShowProbeResults && len(p.state.ProbeResults) > 0 {
-					return StyleQuietButton(g.Button("收起").Size(px(92), px(34)).OnClick(func() {
+					return StyleQuietButton(g.Button(i18n.T("device.probe.hide")).Size(px(92), px(34)).OnClick(func() {
 						p.state.ShowProbeResults = false
 					}))
 				}
@@ -404,7 +408,7 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	)
 
 	if p.state.ShowProbeResults && len(p.state.ProbeResults) > 0 {
-		widgets = append(widgets, sectionHeader("格式兼容性", "点击支持的组合可直接采用"))
+		widgets = append(widgets, sectionHeader(i18n.T("device.formats.compat"), i18n.T("device.formats.click_supported")))
 		for _, result := range p.state.ProbeResults {
 			targetRate := result.Format.SampleRate
 			targetFmt := result.Format.SampleFormat
@@ -419,19 +423,19 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 					})),
 				)
 			} else if supported && p.state.IsDoPSelected() {
-				widgets = append(widgets, fontLabel(label+"  [DoP 参数锁定]", 10.5, ColorTextDim))
+				widgets = append(widgets, fontLabel(label+i18n.T("device.format.dop_locked_suffix"), 10.5, ColorTextDim))
 			} else if supported && streamLocked {
-				widgets = append(widgets, fontLabel(label+"  [输出中已锁定]", 10.5, ColorTextDim))
+				widgets = append(widgets, fontLabel(label+i18n.T("device.format.running_locked_suffix"), 10.5, ColorTextDim))
 			} else {
-				widgets = append(widgets, fontLabel(label+"  [不支持]", 10.5, ColorTextDim))
+				widgets = append(widgets, fontLabel(label+i18n.T("device.native.unsupported_suffix"), 10.5, ColorTextDim))
 			}
 		}
 	} else {
 		widgets = append(widgets,
-			sectionHeader("当前策略", ""),
-			captionLabel("独占模式会绕过系统混音器。"),
-			captionLabel("格式不匹配时，引擎保持静音而不是降级输出。"),
-			captionLabel("使用“检测支持格式”确认 DAC 的能力边界。"),
+			sectionHeader(i18n.T("device.policy.title"), ""),
+			captionLabel(i18n.T("device.policy.exclusive")),
+			captionLabel(i18n.T("device.policy.mismatch")),
+			captionLabel(i18n.T("device.policy.probe")),
 		)
 	}
 

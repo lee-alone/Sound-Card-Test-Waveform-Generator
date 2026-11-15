@@ -168,3 +168,24 @@ func TestQuantizerZeroAllocations(t *testing.T) {
 		t.Errorf("Quantize32Float allocs = %v, want 0", allocs32f)
 	}
 }
+
+func TestAudioRoundingMatchesMathRound(t *testing.T) {
+	for i := -1000; i <= 1000; i++ {
+		s := float64(i) / 1000.0
+		want16 := int32(math.Round(s * maxInt16))
+		if s < 0 {
+			want16 = int32(math.Round(s * (-minInt16)))
+		}
+		want24 := int32(math.Round(s * maxInt24))
+		if s < 0 {
+			want24 = int32(math.Round(s * (-minInt24)))
+		}
+
+		if got := roundAudioSample16(s); got != want16 {
+			t.Fatalf("roundAudioSample16(%v) = %d, want %d", s, got, want16)
+		}
+		if got := roundAudioSample24(s); got != want24 {
+			t.Fatalf("roundAudioSample24(%v) = %d, want %d", s, got, want24)
+		}
+	}
+}

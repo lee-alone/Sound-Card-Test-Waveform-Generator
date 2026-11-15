@@ -37,6 +37,23 @@ func (f DSDFormat) String() string {
 	}
 }
 
+// ShortName returns the stable protocol identifier without rate/display text.
+// Use this value at controller and driver boundaries; String is for UI output.
+func (f DSDFormat) ShortName() string {
+	switch f {
+	case DSD64:
+		return "DSD64"
+	case DSD128:
+		return "DSD128"
+	case DSD256:
+		return "DSD256"
+	case DSD512:
+		return "DSD512"
+	default:
+		return "Unknown DSD"
+	}
+}
+
 func (f DSDFormat) MarshalJSON() ([]byte, error) {
 	switch f {
 	case DSD64:

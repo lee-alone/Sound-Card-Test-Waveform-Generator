@@ -8,6 +8,7 @@ import (
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/engine"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 // DiagnosticsPanel is the compact real-time health strip beneath the working
@@ -43,22 +44,22 @@ func (p *DiagnosticsPanel) Build(width, height float32) g.Widget {
 	stateFg := ColorTextMuted
 	stateText := stateStr
 	if stateText == "" {
-		stateText = "Standby"
+		stateText = i18n.T("diagnostics.standby")
 	}
 
 	isRunning := stateStr == "Running" || stateStr == "4"
 	if isRunning {
 		stateBg = ColorPhosphorDark
 		stateFg = ColorPhosphorGreen
-		stateText = "Running"
+		stateText = i18n.T("diagnostics.running")
 	} else if stateStr == "OpenMuted" || stateStr == "1" {
 		stateBg = ColorDigitalCyanDark
 		stateFg = ColorDigitalCyan
-		stateText = "Muted"
+		stateText = i18n.T("diagnostics.muted")
 	} else if p.state.ErrorMessage != "" {
 		stateBg = ColorAlarmDark
 		stateFg = ColorAlarmRed
-		stateText = "Fault"
+		stateText = i18n.T("diagnostics.fault")
 	}
 
 	uptime := "—"
@@ -73,7 +74,7 @@ func (p *DiagnosticsPanel) Build(width, height float32) g.Widget {
 	}
 	formatValue := diag.SampleFormat
 	if formatValue == "" {
-		formatValue = "未协商"
+		formatValue = i18n.T("diagnostics.not_negotiated")
 	}
 	bufferValue := "—"
 	if diag.BufferPeriodMs > 0 {
@@ -81,39 +82,39 @@ func (p *DiagnosticsPanel) Build(width, height float32) g.Widget {
 	}
 	callbackValue := "—"
 	if diag.RenderCallbackCount > 0 {
-		callbackValue = fmt.Sprintf("%d 次", diag.RenderCallbackCount)
+		callbackValue = i18n.T("diagnostics.count_fmt", diag.RenderCallbackCount)
 	}
 	underrunColor := ColorPhosphorGreen
-	underrunValue := "0 次"
+	underrunValue := i18n.T("diagnostics.zero_count")
 	if diag.UnderrunCount > 0 {
 		underrunColor = ColorAlarmRed
-		underrunValue = fmt.Sprintf("%d 次", diag.UnderrunCount)
+		underrunValue = i18n.T("diagnostics.count_fmt", diag.UnderrunCount)
 	}
 	latencyColor := ColorTextBright
-	latencyValue := "0 次"
+	latencyValue := i18n.T("diagnostics.zero_count")
 	if diag.LateCallbackCount > 0 {
 		latencyColor = ColorAmberWarning
-		latencyValue = fmt.Sprintf("%d 次", diag.LateCallbackCount)
+		latencyValue = i18n.T("diagnostics.count_fmt", diag.LateCallbackCount)
 	}
 
 	stats := g.Table().
 		Flags(g.TableFlagsNoSavedSettings | g.TableFlagsSizingStretchSame | g.TableFlagsNoBordersInBody).
 		NoHeader(true).
 		Rows(g.TableRow(
-			metricCell("运行时间", uptime, ColorTextBright),
-			metricCell("采样率", rateValue, ColorTextBright),
-			metricCell("容器格式", formatValue, ColorTextBright),
-			metricCell("缓冲", bufferValue, ColorTextBright),
-			metricCell("回调 / 欠载", fmt.Sprintf("%s / %s", callbackValue, underrunValue), colorForUnderrun(callbackValue, underrunColor)),
-			metricCell("迟到唤醒", latencyValue, latencyColor),
+			metricCell(i18n.T("diagnostics.uptime"), uptime, ColorTextBright),
+			metricCell(i18n.T("diagnostics.sample_rate"), rateValue, ColorTextBright),
+			metricCell(i18n.T("diagnostics.container_format"), formatValue, ColorTextBright),
+			metricCell(i18n.T("diagnostics.buffer"), bufferValue, ColorTextBright),
+			metricCell(i18n.T("diagnostics.callbacks_underruns"), fmt.Sprintf("%s / %s", callbackValue, underrunValue), colorForUnderrun(callbackValue, underrunColor)),
+			metricCell(i18n.T("diagnostics.late_wakeups"), latencyValue, latencyColor),
 		))
 
 	header := g.Row(
-		titleLabel("运行监测"),
+		titleLabel(i18n.T("diagnostics.runtime_monitor")),
 		g.Spacing(),
 		StyleBadge(stateText, stateBg, stateFg),
 		g.Spacing(),
-		captionLabel(fmt.Sprintf("P99.9 回调负载 %.1f%%  |  %.1f µs  |  %s", diag.P999PercentOfBuffer, diag.P999RenderTimeUs, diag.BitPerfectStatus)),
+		captionLabel(i18n.T("diagnostics.p999_fmt", diag.P999PercentOfBuffer, diag.P999RenderTimeUs, diag.BitPerfectStatus)),
 	)
 
 	return panelBox(width, height, ColorSurface, header, g.Separator(), stats)

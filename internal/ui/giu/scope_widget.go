@@ -10,6 +10,7 @@ import (
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/dsp"
+	"sound-signal-generator/internal/ui/i18n"
 )
 
 const (
@@ -120,7 +121,7 @@ func (s *ScopeWidget) GenerateFrame(numPoints int) ScopeFrame {
 	samples := make([]float64, numPoints)
 
 	duration := scopeCycleWindow / math.Max(1.0, float64(s.state.Frequency))
-	axisDescription := "3 周期窗口"
+	axisDescription := i18n.T("scope.window_cycles")
 	sweepFrequency := 0.0
 	sweepProgress := 0.0
 
@@ -129,28 +130,28 @@ func (s *ScopeWidget) GenerateFrame(numPoints int) ScopeFrame {
 		controller.WaveformPolyBlepSquare,
 		controller.WaveformPolyBlepTriangle:
 		duration = scopeCycleWindow / math.Max(1.0, float64(s.state.Frequency))
-		axisDescription = fmt.Sprintf("%.0fT 窗口 · %s", scopeCycleWindow, formatFrequency(float64(s.state.Frequency)))
+		axisDescription = i18n.T("scope.window_cycles_fmt", scopeCycleWindow, formatFrequency(float64(s.state.Frequency)))
 
 	case controller.WaveformLinearSweep, controller.WaveformLogarithmicSweep:
 		elapsed := s.previewElapsed(now)
 		duration, sweepFrequency, sweepProgress = s.sweepDisplayWindow(wave, elapsed)
-		axisDescription = fmt.Sprintf("固定时基 · 当前 %s · 进度 %.0f%%", formatFrequency(sweepFrequency), sweepProgress*100.0)
+		axisDescription = i18n.T("scope.fixed_time_fmt", formatFrequency(sweepFrequency), sweepProgress*100.0)
 
 	case controller.WaveformWhiteNoise, controller.WaveformPinkNoise:
 		duration = scopeNoiseWindowSec
-		axisDescription = "10 ms 动态噪声窗口"
+		axisDescription = i18n.T("scope.noise_window")
 
 	case controller.WaveformMultitoneSMPTE:
 		duration = scopeCycleWindow / 60.0
-		axisDescription = "SMPTE 60 Hz + 7 kHz"
+		axisDescription = i18n.T("scope.smpte_axis")
 
 	case controller.WaveformMultitoneCCIF:
 		duration = scopeCycleWindow / 19000.0
-		axisDescription = "CCIF 19 kHz + 20 kHz"
+		axisDescription = i18n.T("scope.ccif_axis")
 
 	case controller.WaveformDoP:
 		duration = scopeCycleWindow / 1000.0
-		axisDescription = "DoP 载波示意"
+		axisDescription = i18n.T("scope.dop_axis")
 
 	default:
 		duration = scopeCycleWindow / math.Max(1.0, float64(s.state.Frequency))
@@ -161,7 +162,7 @@ func (s *ScopeWidget) GenerateFrame(numPoints int) ScopeFrame {
 	}
 	duration *= s.XZoom()
 	if !s.XZoomIsDefault() {
-		axisDescription += fmt.Sprintf(" · 窗口 %.2f×", s.XZoom())
+		axisDescription += i18n.T("scope.zoom_suffix_fmt", s.XZoom())
 	}
 
 	x := make([]float64, numPoints)
@@ -258,14 +259,32 @@ func (s *ScopeWidget) sampleRate() int {
 
 func (s *ScopeWidget) previewElapsed(now time.Time) float64 {
 	base := s.previewStart
-	if !s.state.StreamStartTime.IsZero() {
+	if !s.state.SignalStartTime.IsZero() {
+		base = s.state.SignalStartTime
+	} else if !s.state.StreamStartTime.IsZero() {
 		base = s.state.StreamStartTime
 	}
-	elapsed := now.Sub(base).Seconds()
+	// The render side prepares a buffer one device period before the samples
+	// reach the DAC. Delay the visual clock by the same amount so a sweep does
+	// not run ahead of what the operator hears.
+	elapsed := now.Sub(base).Seconds() - s.outputLatencySeconds()
 	if elapsed < 0 {
 		return 0
 	}
 	return elapsed
+}
+
+func (s *ScopeWidget) outputLatencySeconds() float64 {
+	if s.state.IsAsioSelected() && s.state.AsioStatus.LatencyReport != nil {
+		outputFrames := s.state.AsioStatus.LatencyReport.ReportedOutputLatency
+		if outputFrames > 0 {
+			return float64(outputFrames) / float64(s.sampleRate())
+		}
+	}
+	if bufferMs := s.state.Diagnostics.BufferPeriodMs; bufferMs > 0 {
+		return bufferMs / 1000.0
+	}
+	return 0
 }
 
 func (s *ScopeWidget) sweepDisplayWindow(wave controller.WaveformType, elapsed float64) (float64, float64, float64) {
@@ -407,7 +426,7 @@ func (s *ScopeWidget) Build(height int) g.Widget {
 	plot := g.Plot("##oscilloscope").
 		Size(-1, int(px(float32(height)))).
 		SetXAxisLabel(g.AxisX1, frame.AxisLabel).
-		SetYAxisLabel(g.AxisY1, "幅度 / FS").
+		SetYAxisLabel(g.AxisY1, i18n.T("scope.amplitude_fs")).
 		AxisLimits(0, frame.DurationSec, -1.08, 1.08, g.ConditionAlways).
 		XTicks(ticks, false).
 		Plots(
@@ -430,13 +449,13 @@ func (s *ScopeWidget) Build(height int) g.Widget {
 func (s *ScopeWidget) buildStandbyPlot(height int) g.Widget {
 	return g.Plot("##oscilloscope").
 		Size(-1, int(px(float32(height)))).
-		SetXAxisLabel(g.AxisX1, "时间").
-		SetYAxisLabel(g.AxisY1, "幅度 / FS").
+		SetXAxisLabel(g.AxisX1, i18n.T("scope.time_axis")).
+		SetYAxisLabel(g.AxisY1, i18n.T("scope.amplitude_fs")).
 		AxisLimits(0, 1, -1.08, 1.08, g.ConditionAlways).
 		Plots(
 			g.Custom(func() {
-				implot.PlotText("输出待机", 0.5, 0.10)
-				implot.PlotText("点击“开始输出”后显示波形", 0.5, -0.18)
+				implot.PlotText(i18n.T("scope.standby"), 0.5, 0.10)
+				implot.PlotText(i18n.T("scope.standby_hint"), 0.5, -0.18)
 			}),
 		)
 }
@@ -505,7 +524,7 @@ func makeTimeAxis(durationSec float64) ([]g.PlotTicker, string) {
 		label := formatAxisTime(position*scale, durationSec*scale)
 		ticks = append(ticks, g.PlotTicker{Position: position, Label: label})
 	}
-	return ticks, "时间 / " + unit
+	return ticks, i18n.T("scope.time_unit_fmt", unit)
 }
 
 func formatAxisTime(value, span float64) string {
