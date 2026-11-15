@@ -7,6 +7,7 @@ import (
 	"time"
 	"unsafe"
 
+	"sound-signal-generator/internal/audio"
 	"sound-signal-generator/internal/audio/asio/bridge"
 	"sound-signal-generator/internal/dsd"
 )
@@ -227,7 +228,7 @@ func (s *NativeDSDStream) ReleaseBuffer(numFramesWritten int, flags uint32) erro
 	for ch := 0; ch < s.channels; ch++ {
 		src := s.stagingBuf[ch*bytesPerChannel : (ch+1)*bytesPerChannel]
 		dst := s.planar[ch][:bytesPerChannel]
-		if flags&0x01 != 0 {
+		if flags&audio.StreamFlagSilent != 0 {
 			for i := range dst {
 				dst[i] = 0x69 // deterministic DSD idle/silence byte
 			}

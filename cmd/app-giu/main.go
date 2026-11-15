@@ -44,6 +44,9 @@ func main() {
 
 	// 2. UI Boundary Service
 	uiService := controller.NewUIService(ctrl)
+	if err := uiService.LoadSafetyPreferences(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load safety preferences: %v\n", err)
+	}
 
 	// 3. Launch Native Dear ImGui Industrial Console
 	app := giuui.NewGiuApp(uiService)

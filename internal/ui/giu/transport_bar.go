@@ -45,7 +45,7 @@ func (b *TransportBar) Build(width, height float32) g.Widget {
 		statusColor = ColorPhosphorGreen
 		statusBg = ColorPhosphorDark
 		statusText = "信号输出中"
-		detail = "停止按钮会立即请求平滑静音并释放独占输出。"
+		detail = "波形与频率实时生效；采样率和样本格式已锁定。"
 	}
 
 	actions := g.Row(

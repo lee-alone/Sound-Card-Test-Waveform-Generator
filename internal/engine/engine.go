@@ -44,7 +44,7 @@ type AudioEngine struct {
 	fader        *Fader
 	diagnostics  *Diagnostics
 	bufferPool   *BufferPool
-	generator    dsp.Generator
+	generator    atomic.Pointer[generatorRef]
 	rawProvider  RawFrameProvider
 	peakGuard    *format.PeakGuard
 
@@ -55,6 +55,13 @@ type AudioEngine struct {
 	invalidated   atomic.Bool
 
 	activeGoroutine atomic.Bool
+}
+
+// generatorRef keeps the interface value behind an atomic pointer so the
+// control thread can hot-swap a prepared generator without taking a lock on
+// the real-time render thread.
+type generatorRef struct {
+	generator dsp.Generator
 }
 
 // RawFrameProvider defines direct zero-copy byte streaming (used for bit-perfect verification and DoP).
@@ -153,6 +160,7 @@ func (e *AudioEngine) Open(cfg EngineConfig) error {
 	e.cfg = cfg
 	e.device = cfg.Device
 	e.stream = stream
+	e.generator.Store(nil)
 	e.peakGuard = format.NewPeakGuard(cfg.AllowClipping)
 
 	// 4. Transition Probing -> OpenMuted
@@ -184,7 +192,7 @@ func (e *AudioEngine) Prime(gen dsp.Generator) error {
 		return err
 	}
 
-	e.generator = gen
+	e.generator.Store(&generatorRef{generator: gen})
 	e.rawProvider = nil
 	e.bufferPool.Zero()
 
@@ -211,7 +219,7 @@ func (e *AudioEngine) PrimeRaw(provider RawFrameProvider) error {
 	}
 
 	e.rawProvider = provider
-	e.generator = nil
+	e.generator.Store(nil)
 	e.bufferPool.Zero()
 
 	// Transition OpenMuted -> Primed
@@ -232,7 +240,7 @@ func (e *AudioEngine) Start() error {
 		return fmt.Errorf("engine cannot start from state %s", e.stateMachine.Current())
 	}
 
-	if e.generator == nil && e.rawProvider == nil {
+	if e.generator.Load() == nil && e.rawProvider == nil {
 		return errors.New("no generator or raw provider configured")
 	}
 
@@ -268,7 +276,7 @@ func (e *AudioEngine) Start() error {
 			// endpoints reject the silent flag during pre-roll.
 			silentFlags := uint32(0)
 			if e.rawProvider != nil {
-				silentFlags = 0x01
+				silentFlags = audio.StreamFlagSilent
 			}
 			if err := e.stream.ReleaseBuffer(numFrames, silentFlags); err != nil && e.rawProvider != nil {
 				e.fader.Mute()
@@ -293,6 +301,31 @@ func (e *AudioEngine) Start() error {
 
 	go e.renderLoop()
 
+	return nil
+}
+
+// ReplaceGenerator atomically installs a prepared PCM generator while the
+// stream is running. The active format and audio stream remain untouched, so
+// waveform, frequency and sweep changes do not require a stop/start cycle.
+func (e *AudioEngine) ReplaceGenerator(gen dsp.Generator) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	state := e.stateMachine.Current()
+	if state != StateRunning && state != StatePrimed {
+		return fmt.Errorf("engine cannot replace generator from state %s", state)
+	}
+	if gen == nil {
+		return errors.New("generator cannot be nil")
+	}
+	if e.rawProvider != nil {
+		return errors.New("cannot replace a raw frame provider with a PCM generator")
+	}
+	if err := e.peakGuard.Check(gen.MaxPeak()); err != nil {
+		return err
+	}
+
+	e.generator.Store(&generatorRef{generator: gen})
 	return nil
 }
 
@@ -358,6 +391,8 @@ func (e *AudioEngine) Close() error {
 		e.stream = nil
 	}
 	e.device = nil
+	e.generator.Store(nil)
+	e.rawProvider = nil
 
 	if _, err := e.stateMachine.Transition(EventCloseDevice); err != nil {
 		e.stateMachine.ForceState(StateClosed)
@@ -458,12 +493,23 @@ func (e *AudioEngine) renderLoop() {
 				return
 			}
 		} else {
+			genRef := e.generator.Load()
+			if genRef == nil || genRef.generator == nil {
+				e.fader.Mute()
+				e.diagnostics.SetLastErrorCode(0xE0000004)
+				e.stateMachine.ForceState(StateFaulted)
+				e.diagnostics.SetCurrentState(StateFaulted)
+				_ = e.stream.Stop()
+				return
+			}
+			gen := genRef.generator
+
 			// 3. Render waveform samples for all channels
-			if mg, ok := e.generator.(dsp.MultiChannelGenerator); ok {
+			if mg, ok := gen.(dsp.MultiChannelGenerator); ok {
 				mg.RenderChannels(channels[:numChannels])
 			} else {
 				for ch := 0; ch < numChannels; ch++ {
-					e.generator.Render(channels[ch])
+					gen.Render(channels[ch])
 				}
 			}
 

@@ -43,8 +43,12 @@ func (s *testExternalStream) ReleaseBuffer(_ int, flags uint32) error {
 	if s.releaseErr != nil {
 		return s.releaseErr
 	}
+	// Match WASAPI's render-client contract: only 0 or SILENT is accepted.
+	if flags != 0 && flags != audio.StreamFlagSilent {
+		return errors.New("invalid render buffer flags")
+	}
 	s.releaseCnt.Add(1)
-	if flags&0x01 != 0 {
+	if flags&audio.StreamFlagSilent != 0 {
 		s.silentSeen.Store(true)
 	}
 	return nil
@@ -169,7 +173,7 @@ func TestRawProviderFailureFaultsAndStopsStream(t *testing.T) {
 	}
 }
 
-func TestExternalStreamSilentPreRollUsesSilentFlag(t *testing.T) {
+func TestExternalStreamSilentPreRollUsesWASAPISilentFlag(t *testing.T) {
 	stream := &testExternalStream{size: 64, buffer: make([]byte, 16)}
 	eng := NewAudioEngine()
 	defer eng.Close()
@@ -179,7 +183,9 @@ func TestExternalStreamSilentPreRollUsesSilentFlag(t *testing.T) {
 		RawBufferBytes: 16,
 	})
 	_ = eng.PrimeRaw(&testRawProvider{value: 0xAA})
-	_ = eng.Start()
+	if err := eng.Start(); err != nil {
+		t.Fatalf("raw pre-roll must use the WASAPI silent flag: %v", err)
+	}
 	time.Sleep(2 * time.Millisecond)
 	if stream.releaseCnt.Load() == 0 {
 		t.Fatalf("expected pre-roll/render release")

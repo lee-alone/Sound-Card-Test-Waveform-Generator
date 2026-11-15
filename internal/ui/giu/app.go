@@ -1,6 +1,7 @@
 package giuui
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -25,6 +26,7 @@ const (
 
 	dopConfirmationPopupID = "DoP DSD 载波输出安全确认##dop-confirm"
 	nativeDSDPopupID       = "Native DSD 1-bit 直通安全确认##native-dsd-confirm"
+	genericSafetyPopupID   = "通用安全风险确认##generic-safety-confirm"
 )
 
 type GiuApp struct {
@@ -66,14 +68,23 @@ func NewGiuApp(uiService *controller.UIService) *GiuApp {
 }
 
 func (a *GiuApp) StartPlayback() {
-	a.state.StreamStartTime = time.Now()
 	a.generatorPanel.StartPlayback()
+	a.state.IsActiveStream = a.state.ErrorMessage == "" &&
+		!a.state.PendingSafetyStart && !a.state.ShowSafetyConfirm && !a.state.ShowDoPConfirm
+	if a.state.IsActiveStream {
+		a.state.StreamStartTime = time.Now()
+	} else {
+		a.state.StreamStartTime = time.Time{}
+	}
 	a.safeUpdate()
 }
 
 func (a *GiuApp) StopPlayback() {
 	a.state.StreamStartTime = time.Time{}
 	a.generatorPanel.StopPlayback()
+	if a.state.ErrorMessage == "" {
+		a.state.IsActiveStream = false
+	}
 	a.safeUpdate()
 }
 
@@ -176,13 +187,114 @@ func (a *GiuApp) ApplyConfiguration() {
 		return
 	}
 
+	wasRunning := a.state.IsOutputRunning()
+
 	req := a.BuildExtendedRequest()
+	assessment := a.uiService.CheckSafety(req)
+	if assessment.HasRisk && assessment.RequiresConfirmation && !assessment.IsConfirmed {
+		if wasRunning {
+			a.state.PendingSafetyStart = true
+		}
+		a.requestSafetyConfirmation(assessment)
+		return
+	}
+
 	if err := a.uiService.ConfigureSignal(req); err != nil {
 		a.state.ErrorMessage = err.Error()
 	} else {
 		a.state.ErrorMessage = ""
 	}
 	a.safeUpdate()
+}
+
+func (a *GiuApp) requestSafetyConfirmation(assessment controller.SafetyAssessment) {
+	// A risk selected while audio is active must fail safe immediately.
+	_ = a.uiService.StopPlayback()
+	a.state.IsActiveStream = false
+	a.state.StreamStartTime = time.Time{}
+	a.state.ErrorMessage = ""
+	a.state.SafetyAssessment = assessment
+	a.state.StatusMessage = "安全确认待处理：输出保持静音"
+	a.state.SuppressSafetyPrompt = false
+
+	if !a.state.ShowSafetyConfirm {
+		a.state.ShowSafetyConfirm = true
+		g.OpenPopup(genericSafetyPopupID)
+	}
+	a.safeUpdate()
+}
+
+func (a *GiuApp) confirmSafety() {
+	assessment := a.state.SafetyAssessment
+	saveWarning := ""
+	if a.state.SuppressSafetyPrompt {
+		if err := a.uiService.SuppressSafety(string(assessment.Category)); err != nil {
+			saveWarning = err.Error()
+		}
+	} else {
+		a.uiService.ConfirmSafety(string(assessment.Category), true)
+	}
+
+	a.state.ShowSafetyConfirm = false
+	a.state.SuppressSafetyPrompt = false
+	g.CloseCurrentPopup()
+	a.ApplyConfiguration()
+
+	if a.state.PendingSafetyStart {
+		a.state.PendingSafetyStart = false
+		if a.state.ErrorMessage == "" {
+			a.state.StreamStartTime = time.Now()
+			if err := a.uiService.StartPlayback(); err != nil {
+				a.state.ErrorMessage = fmt.Sprintf("启动输出失败: %v", err)
+			} else {
+				a.state.IsActiveStream = true
+				a.state.StatusMessage = "信号输出中"
+			}
+		}
+	} else if a.state.ErrorMessage == "" {
+		a.state.StatusMessage = "安全确认已应用，输出保持静音"
+	}
+
+	if saveWarning != "" {
+		a.state.StatusMessage = fmt.Sprintf("安全确认已应用，但保存“以后不再提示”失败: %s", saveWarning)
+	}
+	a.safeUpdate()
+}
+
+func (a *GiuApp) cancelSafety() {
+	a.state.ShowSafetyConfirm = false
+	a.state.SuppressSafetyPrompt = false
+	a.state.PendingSafetyStart = false
+	a.state.SafetyAssessment = controller.SafetyAssessment{}
+	g.CloseCurrentPopup()
+	a.state.StatusMessage = "安全确认已取消，输出保持静音"
+	a.safeUpdate()
+}
+
+func (a *GiuApp) genericSafetyConfirmationModal() g.Widget {
+	confirmLabel := "确认并应用"
+	if a.state.PendingSafetyStart {
+		confirmLabel = "确认并开始输出"
+	}
+	return g.PopupModal(genericSafetyPopupID).
+		Flags(g.WindowFlagsAlwaysAutoResize).
+		Layout(
+			g.Dummy(px(580), 1),
+			fontLabel("安全风险确认", 16, ColorAlarmRed),
+			fontLabel(a.state.SafetyAssessment.Title, 12.5, ColorTextBright),
+			g.Separator(),
+			g.Label(a.state.SafetyAssessment.WarningMessage).Wrapped(true),
+			g.Spacing(),
+			fontLabel("确认前输出保持静音。请降低监听音量并检查后级设备。", 11, ColorAmberWarning),
+			g.Spacing(),
+			g.Checkbox("以后不再提示此类风险（保存到本机）", &a.state.SuppressSafetyPrompt),
+			g.Separator(),
+			g.Row(
+				StyleQuietButton(g.Button("取消并保持静音").Size(px(190), px(38)).OnClick(a.cancelSafety)),
+				g.Spacing(),
+				StyleDangerButton(g.Button(confirmLabel).Size(px(250), px(38)).OnClick(a.confirmSafety)),
+			),
+		)
 }
 
 func (a *GiuApp) RequestDoPConfirmation() {
@@ -195,6 +307,7 @@ func (a *GiuApp) RequestDoPConfirmation() {
 }
 
 func (a *GiuApp) confirmDoP() {
+	wasRunning := a.state.IsOutputRunning()
 	a.uiService.ConfirmSafety(string(controller.RiskDoP), true)
 	a.state.DoPConfirmed = true
 	a.state.ShowDoPConfirm = false
@@ -202,6 +315,10 @@ func (a *GiuApp) confirmDoP() {
 	a.state.ApplyDoPConstraints()
 	a.ApplyConfiguration()
 	if a.state.ErrorMessage == "" {
+		if wasRunning {
+			a.state.IsActiveStream = true
+			a.state.StreamStartTime = time.Now()
+		}
 		a.state.StatusMessage = "DoP 已解锁，载波参数已锁定"
 	}
 }
@@ -425,6 +542,7 @@ func (a *GiuApp) loop() {
 		a.transportBar.Build(contentW, transH),
 		a.dopConfirmationModal(),
 		a.nativeDSDConfirmationModal(),
+		a.genericSafetyConfirmationModal(),
 	)
 }
 
@@ -443,15 +561,26 @@ func (a *GiuApp) Run() error {
 	a.ApplyConfiguration()
 
 	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
+		// Giu stops refreshing when there is no input. Run the visual clock at
+		// ~30 FPS so noise and sweep previews keep moving, while the heavier
+		// hardware diagnostics remain on their original 10 Hz cadence.
+		ticker := time.NewTicker(33 * time.Millisecond)
 		defer ticker.Stop()
+		frame := 0
 		for {
 			select {
 			case <-ticker.C:
-				if a.isRunning {
+				if !a.isRunning {
+					frame++
+					continue
+				}
+				if frame%3 == 0 {
 					a.diagnosticsPanel.PollMetrics()
+				}
+				if a.generatorPanel.ScopeNeedsAnimation() || frame%3 == 0 {
 					g.Update()
 				}
+				frame++
 			case <-a.stopPolling:
 				return
 			}

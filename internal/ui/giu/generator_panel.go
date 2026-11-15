@@ -3,10 +3,19 @@ package giuui
 import (
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
+	"sync/atomic"
 
+	"github.com/AllenDang/cimgui-go/imgui"
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
 )
+
+type preciseFrequencyField struct {
+	text    string
+	editing bool
+}
 
 // GeneratorPanel owns the signal source, the time-domain preview and the
 // channel-level rail. The oscilloscope is the visual anchor; controls stay in
@@ -19,6 +28,11 @@ type GeneratorPanel struct {
 	scopeWidget       *ScopeWidget
 	metrologyWidget   *MetrologyWidget
 	benchPresets      *BenchPresetsBar
+	animateScope      atomic.Bool
+
+	frequencyField  preciseFrequencyField
+	sweepStartField preciseFrequencyField
+	sweepEndField   preciseFrequencyField
 }
 
 func NewGeneratorPanel(
@@ -53,6 +67,12 @@ func (p *GeneratorPanel) selectedWaveform() controller.WaveformType {
 	return controller.WaveformSine
 }
 
+// ScopeNeedsAnimation is sampled by the UI refresh ticker. Keeping it on the
+// panel makes the refresh policy follow the same waveform selection as Build.
+func (p *GeneratorPanel) ScopeNeedsAnimation() bool {
+	return p.animateScope.Load()
+}
+
 func (p *GeneratorPanel) IsNyquistExceeded() bool {
 	maxSafe := p.GetMaxSafeFrequency()
 	selectedWave := p.selectedWaveform()
@@ -80,7 +100,12 @@ func (p *GeneratorPanel) StartPlayback() {
 	}
 
 	p.state.ErrorMessage = ""
+	p.state.PendingSafetyStart = true
 	p.onParamChanged()
+	if p.state.ShowSafetyConfirm {
+		return
+	}
+	p.state.PendingSafetyStart = false
 	if p.state.ErrorMessage != "" {
 		return
 	}
@@ -140,6 +165,42 @@ func (p *GeneratorPanel) setFrequency(value float32) {
 	p.onParamChanged()
 }
 
+func (p *GeneratorPanel) preciseFrequencyInput(field *preciseFrequencyField, value *float32, maxSafe float64, width float32, id string) g.Widget {
+	return g.Custom(func() {
+		if !field.editing {
+			field.text = formatEditableFrequency(float64(*value))
+		}
+		g.InputText(&field.text).
+			Label(id).
+			Hint("Hz").
+			Flags(g.InputTextFlagsCharsDecimal | g.InputTextFlagsEnterReturnsTrue).
+			Size(width).
+			OnChange(func() {
+				p.commitPreciseFrequency(field, value, maxSafe)
+			}).
+			Build()
+
+		if imgui.IsItemActive() {
+			field.editing = true
+		}
+		if imgui.IsItemDeactivated() {
+			p.commitPreciseFrequency(field, value, maxSafe)
+			field.editing = false
+			field.text = formatEditableFrequency(float64(*value))
+		}
+	})
+}
+
+func (p *GeneratorPanel) commitPreciseFrequency(field *preciseFrequencyField, value *float32, maxSafe float64) {
+	corrected := correctFrequencyInput(field.text, float64(*value), maxSafe)
+	field.text = formatEditableFrequency(corrected)
+	if math.Abs(corrected-float64(*value)) < 1e-9 {
+		return
+	}
+	*value = float32(corrected)
+	p.onParamChanged()
+}
+
 func (p *GeneratorPanel) applyLevel(dbFS float32) {
 	p.state.LeftVolumeDBFS = dbFS
 	p.state.RightVolumeDBFS = dbFS
@@ -152,6 +213,8 @@ func (p *GeneratorPanel) applyLevel(dbFS float32) {
 func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 	contentW := width - px(40)
 	selectedWave := p.selectedWaveform()
+	streamLocked := p.state.IsOutputRunning()
+	p.animateScope.Store(p.scopeWidget.NeedsAnimation())
 	waveIndex := clampIndex(p.state.SelectedWaveformIndex, len(WaveformOptions))
 	wavePreview := WaveformOptions[waveIndex].Label
 
@@ -187,6 +250,16 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		routeComboW = contentW * 0.28
 	}
 
+	scopeResetControl := func() g.Widget {
+		if p.scopeWidget.XZoomIsDefault() {
+			return g.Dummy(px(1), px(1))
+		}
+		return StyleQuietButton(
+			g.Button("恢复默认 X 轴").
+				Size(px(108), px(22)).
+				OnClick(p.scopeWidget.ResetXZoom),
+		)
+	}()
 	scopeHeader := g.Row(
 		captionLabel("时域预览"),
 		g.Spacing(),
@@ -195,6 +268,8 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		fontLabel("L 左声道", 10.5, ColorDigitalCyan),
 		g.Spacing(),
 		fontLabel("R 右声道", 10.5, ColorAmberWarning),
+		g.Spacing(),
+		scopeResetControl,
 	)
 	scopeLogicalHeight := int(bodyH/px(1)) - 92
 	if scopeLogicalHeight < 150 {
@@ -217,12 +292,18 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 
 	switch selectedWave {
 	case controller.WaveformSine, controller.WaveformPolyBlepSquare, controller.WaveformPolyBlepTriangle:
+		frequencyInputW := px(86)
+		frequencySliderW := railContentW - frequencyInputW - px(8)
 		widgets = append(widgets,
-			captionLabel(fmt.Sprintf("频率  ·  最高 %.0f Hz", p.GetMaxSafeFrequency())),
-			g.SliderFloat(&p.state.Frequency, 1.0, float32(p.GetMaxSafeFrequency())).
-				Format("%.1f Hz").
-				Size(railContentW).
-				OnChange(p.onParamChanged),
+			captionLabel(fmt.Sprintf("频率  ·  最高 %.0f Hz · 可精确输入", p.GetMaxSafeFrequency())),
+			g.Row(
+				g.SliderFloat(&p.state.Frequency, 1.0, float32(p.GetMaxSafeFrequency())).
+					Format("%.1f Hz").
+					Size(frequencySliderW).
+					OnChange(p.onParamChanged),
+				g.Spacing(),
+				p.preciseFrequencyInput(&p.frequencyField, &p.state.Frequency, p.GetMaxSafeFrequency(), frequencyInputW, "##frequencyInput"),
+			),
 			g.Row(
 				quickButton("100", railContentW, func() { p.setFrequency(100) }),
 				quickButton("440", railContentW, func() { p.setFrequency(440) }),
@@ -233,13 +314,23 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		)
 
 	case controller.WaveformLinearSweep, controller.WaveformLogarithmicSweep:
+		frequencyInputW := px(86)
+		frequencySliderW := railContentW - frequencyInputW - px(8)
 		widgets = append(widgets,
-			captionLabel("起始频率"),
-			g.SliderFloat(&p.state.SweepStartFreq, 1.0, float32(p.GetMaxSafeFrequency())).
-				Format("%.0f Hz").Size(railContentW).OnChange(p.onParamChanged),
-			captionLabel("终止频率"),
-			g.SliderFloat(&p.state.SweepEndFreq, 1.0, float32(p.GetMaxSafeFrequency())).
-				Format("%.0f Hz").Size(railContentW).OnChange(p.onParamChanged),
+			captionLabel("起始频率 · 可精确输入"),
+			g.Row(
+				g.SliderFloat(&p.state.SweepStartFreq, 1.0, float32(p.GetMaxSafeFrequency())).
+					Format("%.1f Hz").Size(frequencySliderW).OnChange(p.onParamChanged),
+				g.Spacing(),
+				p.preciseFrequencyInput(&p.sweepStartField, &p.state.SweepStartFreq, p.GetMaxSafeFrequency(), frequencyInputW, "##sweepStartInput"),
+			),
+			captionLabel("终止频率 · 可精确输入"),
+			g.Row(
+				g.SliderFloat(&p.state.SweepEndFreq, 1.0, float32(p.GetMaxSafeFrequency())).
+					Format("%.1f Hz").Size(frequencySliderW).OnChange(p.onParamChanged),
+				g.Spacing(),
+				p.preciseFrequencyInput(&p.sweepEndField, &p.state.SweepEndFreq, p.GetMaxSafeFrequency(), frequencyInputW, "##sweepEndInput"),
+			),
 			captionLabel("扫描时长"),
 			g.SliderFloat(&p.state.SweepDurationSec, 0.5, 30.0).
 				Format("%.1f 秒").Size(railContentW).OnChange(p.onParamChanged),
@@ -272,18 +363,26 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 			fontLabel("dCS DoP v1.1 载波", 13, ColorTextBright),
 			captionLabel("1-bit DSD 封装于 24-bit PCM 帧；不是 Native DSD。"),
 			captionLabel("DSD 位流规格"),
-			g.Combo("##dopFormat", format.Label, formatLabels, &p.state.DoPFormatIndex).
-				Size(railContentW).
-				OnChange(p.onDoPParametersChanged),
+			disableWhen(streamLocked,
+				g.Combo("##dopFormat", format.Label, formatLabels, &p.state.DoPFormatIndex).
+					Size(railContentW).
+					OnChange(p.onDoPParametersChanged)),
 			captionLabel("Bit Order"),
-			g.Combo("##dopBitOrder", DoPBitOrderLabels[bitOrderIndex], DoPBitOrderLabels, &p.state.DoPBitOrderIndex).
-				Size(railContentW).
-				OnChange(p.onDoPParametersChanged),
+			disableWhen(streamLocked,
+				g.Combo("##dopBitOrder", DoPBitOrderLabels[bitOrderIndex], DoPBitOrderLabels, &p.state.DoPBitOrderIndex).
+					Size(railContentW).
+					OnChange(p.onDoPParametersChanged)),
 			g.Separator(),
 			lockedParamRow("载波采样率", fmt.Sprintf("%.1f kHz", float64(format.CarrierRate)/1000.0), railContentW),
 			lockedParamRow("PCM 容器", "24-in-32 LE · 强制", railContentW),
 			lockedParamRow("输出增益", "0 dBFS Unity Gain", railContentW),
 			lockedParamRow("位序", bitOrder.String(), railContentW),
+			func() g.Widget {
+				if streamLocked {
+					return captionLabel("输出中已锁定；停止后可更改 DoP 载波参数。")
+				}
+				return g.Dummy(px(1), px(1))
+			}(),
 			captionLabel("淡化、左右电平与校准微调在此路径禁用。"),
 			fontLabel("请先断开扬声器/耳机和模拟功放。", 10.5, ColorAmberWarning),
 		)
@@ -419,6 +518,35 @@ func lockedParamRow(label, value string, contentW float32) g.Widget {
 		g.Spacing(),
 		fontLabel(value, 11, ColorTextBright),
 	)
+}
+
+func formatEditableFrequency(hz float64) string {
+	text := strconv.FormatFloat(hz, 'f', 3, 64)
+	text = strings.TrimRight(text, "0")
+	text = strings.TrimRight(text, ".")
+	if text == "" || text == "-0" {
+		return "0"
+	}
+	return text
+}
+
+// correctFrequencyInput silently repairs invalid or out-of-range operator
+// input. Invalid text restores the previous value; numeric values are clamped
+// to the supported generator range without opening an error dialog.
+func correctFrequencyInput(raw string, current, maxSafe float64) float64 {
+	minSafe := 1.0
+	if maxSafe < minSafe {
+		maxSafe = minSafe
+	}
+	current = math.Max(minSafe, math.Min(maxSafe, current))
+
+	text := strings.TrimSpace(raw)
+	text = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(text, "Hz"), "hz"))
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return current
+	}
+	return math.Max(minSafe, math.Min(maxSafe, value))
 }
 
 var _ = math.Pow

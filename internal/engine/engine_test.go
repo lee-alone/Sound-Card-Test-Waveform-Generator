@@ -60,9 +60,9 @@ type MockEngineDevice struct {
 	stream *MockStream
 }
 
-func (d *MockEngineDevice) ID() string         { return "mock-engine-dev" }
-func (d *MockEngineDevice) Name() string       { return "Mock Engine Device" }
-func (d *MockEngineDevice) Flow() audio.DeviceFlow { return audio.FlowRender }
+func (d *MockEngineDevice) ID() string               { return "mock-engine-dev" }
+func (d *MockEngineDevice) Name() string             { return "Mock Engine Device" }
+func (d *MockEngineDevice) Flow() audio.DeviceFlow   { return audio.FlowRender }
 func (d *MockEngineDevice) State() audio.DeviceState { return audio.StateActive }
 func (d *MockEngineDevice) ProbeCapabilities(candidates []audio.AudioFormat, shareMode audio.ShareMode) ([]audio.FormatSupportResult, error) {
 	results := make([]audio.FormatSupportResult, len(candidates))
@@ -140,6 +140,60 @@ func TestEngineLifecycleAndTransitions(t *testing.T) {
 	if eng.State() != StateClosed {
 		t.Fatalf("state after Close want Closed, got %v", eng.State())
 	}
+}
+
+func TestEngine_ReplaceGeneratorWhileRunning(t *testing.T) {
+	eng := NewAudioEngine()
+	mockStream := NewMockStream(480, 4)
+	dev := &MockEngineDevice{stream: mockStream}
+
+	cfg := EngineConfig{
+		Device: dev,
+		Format: audio.AudioFormat{
+			SampleRate:   48000,
+			Channels:     2,
+			SampleFormat: audio.SampleFormat16Int,
+		},
+		ShareMode:      audio.ShareModeExclusive,
+		BufferDuration: 10 * time.Millisecond,
+		FadeDurationMs: 10.0,
+	}
+	if err := eng.Open(cfg); err != nil {
+		t.Fatalf("eng.Open failed: %v", err)
+	}
+
+	sine := dsp.NewSineGenerator()
+	_ = sine.Prepare(dsp.Config{SampleRate: 48000, Frequency: 1000.0, Amplitude: 0.5})
+	if err := eng.Prime(sine); err != nil {
+		t.Fatalf("eng.Prime failed: %v", err)
+	}
+	if err := eng.Start(); err != nil {
+		t.Fatalf("eng.Start failed: %v", err)
+	}
+
+	square := dsp.NewPolyBLEPSquareGenerator()
+	_ = square.Prepare(dsp.Config{SampleRate: 48000, Frequency: 2000.0, Amplitude: 0.5})
+	if err := eng.ReplaceGenerator(square); err != nil {
+		t.Fatalf("eng.ReplaceGenerator failed: %v", err)
+	}
+
+	time.Sleep(25 * time.Millisecond)
+	if eng.State() != StateRunning {
+		t.Fatalf("hot swap must keep engine running, got %s", eng.State())
+	}
+	genRef := eng.generator.Load()
+	if genRef == nil {
+		t.Fatal("expected an active generator after hot swap")
+	}
+	if _, ok := genRef.generator.(*dsp.PolyBLEPSquareGenerator); !ok {
+		t.Fatalf("expected PolyBLEP square generator, got %T", genRef.generator)
+	}
+	if !mockStream.started.Load() {
+		t.Fatal("hot swap must not stop the audio stream")
+	}
+
+	_ = eng.Stop()
+	_ = eng.Close()
 }
 
 func TestFaultInjectionSafeMuteInOnePeriod(t *testing.T) {

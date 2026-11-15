@@ -64,9 +64,9 @@
 
 ~~~mermaid
 flowchart TD
-    subgraph UI_Layer ["表现层（Wails）"]
+    subgraph UI_Layer ["表现层（GIU）"]
         View["仪表盘与参数交互"]
-        State["前端状态存储"]
+        State["UI 状态存储"]
     end
 
     subgraph Controller_Layer ["控制层（pkg/controller）"]
@@ -126,7 +126,7 @@ flowchart TD
 ### 2.1 依赖规则
 
 - UI 只能调用 Controller，不得直接访问 Engine、DSP 或 Audio Backend。
-- DSP 不得依赖 Windows API、Wails、设备对象或日志组件。
+- DSP 不得依赖 Windows API、GUI、设备对象或日志组件。
 - Audio Backend 不得包含波形算法。
 - DSD 调制与 DoP 传输必须独立，便于分别验证。
 - 实时线程只读取准备完成的不可变配置或无阻塞命令。
@@ -137,7 +137,9 @@ flowchart TD
 
     sound-signal-generator/
     ├── cmd/
-    │   └── app/
+    │   ├── app-giu/
+    │   │   └── main.go
+    │   └── cli-mvp/
     │       └── main.go
     ├── internal/
     │   ├── audio/
@@ -176,11 +178,16 @@ flowchart TD
     │   │   ├── buffer.go
     │   │   ├── fader.go
     │   │   └── diagnostics.go
-    │   └── controller/
-    │       ├── controller.go
-    │       └── validation.go
-    ├── frontend/
-    │   └── src/
+    │   ├── controller/
+    │   │   ├── controller.go
+    │   │   └── validation.go
+    │   └── ui/
+    │       └── giu/
+    │           ├── app.go
+    │           ├── device_panel.go
+    │           ├── generator_panel.go
+    │           ├── diagnostics_panel.go
+    │           └── theme.go
     ├── testdata/
     │   ├── pcm/
     │   └── dop/
@@ -671,7 +678,7 @@ UI 和日志应记录：
 
 ### Phase 4：完整 GUI
 
-- 构建仪器风格 Wails GUI。
+- 构建仪器风格 GIU 原生 GUI。
 - 实现设备、格式、波形、频率和电平控制。
 - 显示状态机、实际格式、风险提示和实时诊断。
 - 支持配置导入导出，但不自动恢复有声输出。

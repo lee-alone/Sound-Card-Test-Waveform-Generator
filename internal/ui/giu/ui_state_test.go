@@ -3,10 +3,12 @@ package giuui
 import (
 	"math"
 	"testing"
+	"time"
 
 	"sound-signal-generator/internal/audio"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/dsd"
+	"sound-signal-generator/internal/engine"
 )
 
 func TestUIState_Defaults(t *testing.T) {
@@ -35,6 +37,24 @@ func TestUIState_Defaults(t *testing.T) {
 	}
 	if state.DoPBitOrderIndex != 0 || state.SelectedDoPBitOrder() != dsd.BitOrderMSBFirst {
 		t.Errorf("expected default DoP bit order MSB First, got index=%d order=%v", state.DoPBitOrderIndex, state.SelectedDoPBitOrder())
+	}
+}
+
+func TestUIState_OutputRunningLocksFromEitherSignal(t *testing.T) {
+	state := NewUIState()
+	if state.IsOutputRunning() {
+		t.Fatal("new UI state must not report active output")
+	}
+
+	state.IsActiveStream = true
+	if !state.IsOutputRunning() {
+		t.Fatal("transport flag should lock output format controls")
+	}
+
+	state.IsActiveStream = false
+	state.Diagnostics.State = engine.StateRunning
+	if !state.IsOutputRunning() {
+		t.Fatal("diagnostics state should lock output format controls")
 	}
 }
 
@@ -161,6 +181,49 @@ func TestGeneratorPanel_NyquistCheck(t *testing.T) {
 	}
 }
 
+func TestGeneratorPanel_CorrectFrequencyInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		current float64
+		max     float64
+		want    float64
+	}{
+		{name: "precise value", input: "438", current: 440, max: 21600, want: 438},
+		{name: "decimal value", input: "438.5", current: 440, max: 21600, want: 438.5},
+		{name: "hz suffix", input: " 438.25Hz ", current: 440, max: 21600, want: 438.25},
+		{name: "below minimum", input: "0", current: 440, max: 21600, want: 1},
+		{name: "negative", input: "-20", current: 440, max: 21600, want: 1},
+		{name: "above maximum", input: "99999", current: 440, max: 21600, want: 21600},
+		{name: "invalid restores current", input: "not-a-number", current: 440, max: 21600, want: 440},
+		{name: "empty restores current", input: "   ", current: 440, max: 21600, want: 440},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := correctFrequencyInput(tc.input, tc.current, tc.max)
+			if math.Abs(got-tc.want) > 1e-9 {
+				t.Fatalf("correctFrequencyInput(%q) = %f, want %f", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGeneratorPanel_FormatEditableFrequency(t *testing.T) {
+	tests := map[float64]string{
+		440:    "440",
+		438.5:  "438.5",
+		1000:   "1000",
+		20000:  "20000",
+		438.25: "438.25",
+	}
+	for value, want := range tests {
+		if got := formatEditableFrequency(value); got != want {
+			t.Errorf("formatEditableFrequency(%f) = %q, want %q", value, got, want)
+		}
+	}
+}
+
 func TestScopeWidget_Synthesis(t *testing.T) {
 	state := NewUIState()
 	state.LeftVolumeDBFS = 0.0
@@ -185,6 +248,144 @@ func TestScopeWidget_Synthesis(t *testing.T) {
 	if math.Abs(lInv[50]+rInv[50]) > 0.0001 {
 		t.Errorf("differential mode should have inverted R trace, got L=%f, R=%f", lInv[50], rInv[50])
 	}
+}
+
+func TestScopeWidget_TimeAxisTracksFrequency(t *testing.T) {
+	state := NewUIState()
+	state.SelectedWaveformIndex = 0   // Sine
+	state.SelectedSampleRateIndex = 1 // 48 kHz
+	state.Frequency = 1000
+
+	scope := NewScopeWidget(state)
+	frame1k := scope.GenerateFrame(301)
+
+	if math.Abs(frame1k.DurationSec-0.003) > 1e-12 {
+		t.Fatalf("1 kHz should display 3 periods (3 ms), got %.12f s", frame1k.DurationSec)
+	}
+	if len(frame1k.X) != 301 || len(frame1k.Left) != 301 || len(frame1k.Right) != 301 {
+		t.Fatalf("unexpected frame lengths: X=%d L=%d R=%d", len(frame1k.X), len(frame1k.Left), len(frame1k.Right))
+	}
+	if math.Abs(frame1k.X[0]) > 1e-15 || math.Abs(frame1k.X[len(frame1k.X)-1]-frame1k.DurationSec) > 1e-12 {
+		t.Errorf("X axis must span [0, window duration]")
+	}
+	for i := 1; i < len(frame1k.X); i++ {
+		if frame1k.X[i] <= frame1k.X[i-1] {
+			t.Fatalf("X axis must be strictly increasing at index %d", i)
+		}
+	}
+
+	state.Frequency = 10000
+	frame10k := scope.GenerateFrame(301)
+	if math.Abs(frame10k.DurationSec-0.0003) > 1e-12 {
+		t.Fatalf("10 kHz should display 3 periods (300 us), got %.12f s", frame10k.DurationSec)
+	}
+}
+
+func TestScopeWidget_WheelZoomAndReset(t *testing.T) {
+	state := NewUIState()
+	state.SelectedWaveformIndex = 0 // Sine
+	state.Frequency = 1000
+
+	scope := NewScopeWidget(state)
+	base := scope.GenerateFrame(101).DurationSec
+	if !scope.XZoomIsDefault() {
+		t.Fatal("scope must start at the default X zoom")
+	}
+
+	scope.applyXZoomWheel(1)
+	zoomedIn := scope.GenerateFrame(101).DurationSec
+	if scope.XZoomIsDefault() {
+		t.Fatal("wheel up should leave the default X zoom")
+	}
+	if math.Abs(zoomedIn-base*scopeWheelZoomStep) > 1e-12 {
+		t.Fatalf("wheel up should shrink X window to %.2fx, got base %.9f -> %.9f", scopeWheelZoomStep, base, zoomedIn)
+	}
+
+	scope.ResetXZoom()
+	if !scope.XZoomIsDefault() {
+		t.Fatal("reset should restore the default X zoom")
+	}
+
+	scope.applyXZoomWheel(-1000)
+	if math.Abs(scope.XZoom()-scopeMaxXZoom) > 1e-6 {
+		t.Fatalf("zoom out must clamp at %.2f, got %.6f", scopeMaxXZoom, scope.XZoom())
+	}
+	scope.applyXZoomWheel(1000)
+	if math.Abs(scope.XZoom()-scopeMinXZoom) > 1e-6 {
+		t.Fatalf("zoom in must clamp at %.2f, got %.6f", scopeMinXZoom, scope.XZoom())
+	}
+}
+
+func TestScopeWidget_NoiseAnimates(t *testing.T) {
+	state := NewUIState()
+	state.SelectedWaveformIndex = 5 // White noise
+	scope := NewScopeWidget(state)
+
+	first := scope.GenerateFrame(256)
+	second := scope.GenerateFrame(256)
+
+	changed := false
+	for i := range first.Left {
+		if math.Abs(first.Left[i]-second.Left[i]) > 1e-12 {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Fatal("noise preview should advance its PRNG state between frames")
+	}
+}
+
+func TestScopeWidget_SweepAnimates(t *testing.T) {
+	state := NewUIState()
+	state.SelectedWaveformIndex = 3 // Linear sweep
+	state.SweepStartFreq = 20
+	state.SweepEndFreq = 20000
+	state.SweepDurationSec = 5
+	state.SweepLoop = true
+	state.StreamStartTime = time.Time{}
+
+	scope := NewScopeWidget(state)
+	clock := time.Unix(0, 0)
+	scope.now = func() time.Time { return clock }
+	scope.previewStart = clock
+
+	first := scope.GenerateFrame(256)
+	clock = clock.Add(500 * time.Millisecond)
+	second := scope.GenerateFrame(256)
+
+	if math.Abs(first.DurationSec-second.DurationSec) > 1e-15 {
+		t.Fatalf("sweep timebase must stay stable across frames, got %.9fs -> %.9fs", first.DurationSec, second.DurationSec)
+	}
+	if first.AxisLabel == second.AxisLabel {
+		t.Fatal("sweep status label should update with sweep progress")
+	}
+	changed := false
+	for i := range first.Left {
+		if math.Abs(first.Left[i]-second.Left[i]) > 1e-12 {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Fatal("sweep preview should advance with elapsed playback time")
+	}
+	if crossings := countZeroCrossings(second.Left); crossings <= countZeroCrossings(first.Left) {
+		t.Fatalf("higher sweep frequency should visibly increase waveform density, crossings %d -> %d", countZeroCrossings(first.Left), crossings)
+	}
+}
+
+func countZeroCrossings(samples []float64) int {
+	crossings := 0
+	for i := 1; i < len(samples); i++ {
+		if samples[i-1] == 0 || samples[i] == 0 {
+			continue
+		}
+		if (samples[i-1] < 0) != (samples[i] < 0) {
+			crossings++
+		}
+	}
+	return crossings
 }
 
 func TestBenchPresets_Application(t *testing.T) {

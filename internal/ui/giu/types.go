@@ -6,6 +6,7 @@ import (
 	"sound-signal-generator/internal/audio"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/dsd"
+	"sound-signal-generator/internal/engine"
 )
 
 // Supported sample rate candidates for manual selection
@@ -171,6 +172,13 @@ type UIState struct {
 	ShowProbeResults bool
 	IsProbing        bool
 
+	// Generic risk confirmation state used by square, multitone and ultrasound
+	// signals. DoP and Native DSD retain their dedicated higher-friction flows.
+	ShowSafetyConfirm    bool
+	SafetyAssessment     controller.SafetyAssessment
+	SuppressSafetyPrompt bool
+	PendingSafetyStart   bool
+
 	// Diagnostics & Stream Telemetry
 	Diagnostics     controller.DiagnosticsReport
 	StatusMessage   string
@@ -254,6 +262,13 @@ func (s *UIState) SelectedNativeDSDFormat() dsd.DSDFormat {
 func (s *UIState) IsDoPSelected() bool {
 	index := clampIndex(s.SelectedWaveformIndex, len(WaveformOptions))
 	return WaveformOptions[index].ID == controller.WaveformDoP
+}
+
+// IsOutputRunning reports whether the physical output stream is active. The
+// flag is maintained by the transport buttons and refreshed from diagnostics,
+// making it safe to use for locking format controls in either code path.
+func (s *UIState) IsOutputRunning() bool {
+	return s.IsActiveStream || s.Diagnostics.State == engine.StateRunning
 }
 
 // SelectedDoPFormat returns the validated DSD format currently selected.

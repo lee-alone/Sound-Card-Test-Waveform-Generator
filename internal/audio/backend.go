@@ -19,6 +19,12 @@ const (
 	ShareModeExclusive
 )
 
+// StreamFlagSilent requests that the stream ignore the supplied buffer and
+// render silence. The value matches WASAPI's
+// AUDCLNT_BUFFERFLAGS_SILENT; non-WASAPI streams translate it to their own
+// idle pattern instead of interpreting the raw native flag.
+const StreamFlagSilent uint32 = 0x00000002
+
 func (s ShareMode) String() string {
 	switch s {
 	case ShareModeShared:

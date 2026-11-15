@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -224,20 +225,70 @@ func TestController_ReconfigureWhileRunning(t *testing.T) {
 		t.Fatalf("StartPlayback failed: %v", err)
 	}
 
-	// Re-configure while running: should stop, close, reopen, and prime
+	// Re-configure a DSP-only parameter while running: the stream must remain
+	// active and the generator must be replaced in place.
 	req.Frequency = 2000.0
+	req.Waveform = WaveformPolyBlepTriangle
 	if err := ctrl.ConfigureExtendedSignal(req); err != nil {
 		t.Fatalf("reconfigure while running failed: %v", err)
 	}
 
-	if ctrl.engine.State() != engine.StatePrimed {
-		t.Fatalf("expected state Primed, got %s", ctrl.engine.State())
+	if ctrl.engine.State() != engine.StateRunning {
+		t.Fatalf("expected state Running after hot swap, got %s", ctrl.engine.State())
 	}
 
-	// Resume
-	if err := ctrl.StartPlayback(); err != nil {
-		t.Fatalf("StartPlayback after reconfigure failed: %v", err)
+	_ = ctrl.StopPlayback()
+}
+
+func TestController_FormatLockedWhileRunning(t *testing.T) {
+	ctrl := setupTestController(t)
+	defer ctrl.Close()
+
+	req := DefaultExtendedSignalRequest()
+	if err := ctrl.ConfigureExtendedSignal(req); err != nil {
+		t.Fatalf("ConfigureExtendedSignal failed: %v", err)
 	}
+	if err := ctrl.StartPlayback(); err != nil {
+		t.Fatalf("StartPlayback failed: %v", err)
+	}
+
+	req.SampleRate = 96000
+	req.SampleFormat = audio.SampleFormat32Float
+	err := ctrl.ConfigureExtendedSignal(req)
+	if !errors.Is(err, ErrOutputFormatLocked) {
+		t.Fatalf("expected ErrOutputFormatLocked, got %v", err)
+	}
+	if ctrl.engine.State() != engine.StateRunning {
+		t.Fatalf("format-lock rejection must leave the stream running, got %s", ctrl.engine.State())
+	}
+
+	_ = ctrl.StopPlayback()
+}
+
+func TestController_SwitchToDoPWhileRunningResumes(t *testing.T) {
+	ctrl := setupTestController(t)
+	defer ctrl.Close()
+
+	req := DefaultExtendedSignalRequest()
+	if err := ctrl.ConfigureExtendedSignal(req); err != nil {
+		t.Fatalf("initial ConfigureExtendedSignal failed: %v", err)
+	}
+	if err := ctrl.StartPlayback(); err != nil {
+		t.Fatalf("initial StartPlayback failed: %v", err)
+	}
+
+	ctrl.ConfirmSafety(RiskDoP, true)
+	req.Waveform = WaveformDoP
+	req.DoP.DSDFormat = dsd.DSD64
+	req.SampleRate = 176400
+	req.SampleFormat = audio.SampleFormat24In32
+	if err := ctrl.ConfigureExtendedSignal(req); err != nil {
+		t.Fatalf("switch to DoP while running failed: %v", err)
+	}
+	if ctrl.engine.State() != engine.StateRunning {
+		t.Fatalf("DoP transition should automatically resume, got %s", ctrl.engine.State())
+	}
+
 	_ = ctrl.StopPlayback()
 }
 

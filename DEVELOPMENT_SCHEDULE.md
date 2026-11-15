@@ -6,7 +6,7 @@
 ## 1. 制定原则、工期假设与工具链基线
 
 ### 1.1 研发资源与工期计算模型
-* **研发模式**：单人全栈研发（音频核心算法 + Windows 系统级驱动封装 + 前端 UI）。
+* **研发模式**：单人全栈研发（音频核心算法 + Windows 系统级驱动封装 + 桌面 UI）。
 * **工作日与排程口径**：
   * 按标准工作日（周一至周五，排除法定节假日）测算，日历排程在甘特图中显式配置 `excludes weekends`。
   * **工期与缓冲配比**：
@@ -21,11 +21,11 @@
 
 ### 1.2 工具链与运行时版本锁定
 * **Go 语言运行时**：项目初始化时锁定到 **Go 1.27.x 的具体补丁版本**，同时在 go.mod/toolchain 与 CI 中保持一致。
-* **GUI 框架基线**：采用 **Wails v3**；T0.1 必须在 go.mod 与前端锁文件中记录实际使用的精确版本，不使用无上限的浮动依赖。
-* **前端运行时策略**：
-  * 开发与测试期：优先使用系统已安装的 **Evergreen WebView2 Runtime**，但不得假设所有 Windows 10/11 环境均已预装。
-  * 架构防护：主程序启动时增加运行时自检，缺失时弹出原生错误并阻断，绝不静默崩溃。
-  * 发布阶段（Phase 6）：构建包含 WebView2 Bootstrapper 在线的标准安装包及免安装便携包。
+* **GUI 框架基线**：采用 **AllenDang/giu**；T0.1 必须在 go.mod 中记录实际使用的精确版本，不使用无上限的浮动依赖。
+* **UI 运行时策略**：
+  * 使用 Go 原生 GIU/OpenGL 渲染，不依赖 WebView2 或浏览器运行时。
+  * 主程序直接创建原生桌面窗口，减少外部运行时前置条件。
+  * 发布阶段（Phase 6）：构建标准安装包及免安装便携包。
 
 ---
 
@@ -36,7 +36,7 @@ flowchart TD
     M0["【Phase 0】高风险技术验证 (Tech Spike)<br/>WASAPI独占排他 + MMCSS + COM(SUCCEEDED) + 原型零分配 + ASIO许可调研"] --> M1["【Phase 1】安全 PCM MVP 核心引擎<br/>44.1k/48k双晶振族 + 8状态安全状态机 + 故障注入静音 + 1h Soak Test"]
     M1 --> M2["【Phase 2】仪器级 DSP 算法库<br/>PolyBLEP带限方波/三角波 + 对数扫频 + 多音PAPR保护 + 分类离线FFT回归"]
     M2 --> M3["【Phase 3】DSD 向量与 DoP 传输协议<br/>DSD64/128 DoP向量 + DSD256/512离线Native向量 + 176.4k/352.8k独占 + CLI安全确认 + ADC验证"]
-    M3 --> M4["【Phase 4】现代化 Wails v3 仪器界面<br/>全DSP波形控件 + 高危弹窗 + 10Hz诊断轮询(P99.9性能基线) + 配置安全导入"]
+    M3 --> M4["【Phase 4】现代化 GIU 原生仪器界面<br/>全DSP波形控件 + 高危弹窗 + 10Hz诊断轮询(P99.9性能基线) + 配置安全导入"]
     M4 --> M5["【Phase 5】ASIO 驱动与 Native DSD 原生直通<br/>ASIO C-Bridge + 回环脉冲测延迟 + Native DSD256/512 + 8h Soak Test"]
     M5 --> M6["【Phase 6】闭环测量扩展与正式发布<br/>±50ppm时钟漂移校准 + 全指标离线分析(REW标定) + 24h极限老化 + 签名打包"]
 ```
@@ -50,7 +50,7 @@ flowchart TD
 
 | 任务 ID | 任务名称 | 责任文件 / 模块 | 计划状态 | 实际状态 | 工期(天) | 交付产物与量化验收指标 |
 | :--- | :--- | :--- | :---: | :---: | :---: | :--- |
-| **T0.1** | 工程基线初始化 | `go.mod`, 目录骨架 | Planned | 未开始 | 1 | 初始化并锁定 Go 1.27.x、Wails v3 精确版本及前端依赖锁文件；建立 `internal/` 规范目录骨架；配置 `golangci-lint`。验收：在本机与 CI 中执行 `go build ./...`、`go test ./...` 均干净通过，依赖解析结果一致。 |
+| **T0.1** | 工程基线初始化 | `go.mod`, 目录骨架 | Planned | 未开始 | 1 | 初始化并锁定 Go 1.27.x 与 GIU 精确版本；建立 `internal/` 规范目录骨架；配置 `golangci-lint`。验收：在本机与 CI 中执行 `go build ./...`、`go test ./...` 均干净通过，依赖解析结果一致。 |
 | **T0.2** | COM & MMCSS 原型探针 | `cmd/spike/com_mmcss_test.go` | Planned | 未开始 | 1.5 | 验证固定 goroutine 绑定。验收：调用 `CoInitializeEx` 满足 `SUCCEEDED(hr)`（兼容 `S_OK` 与 `S_FALSE`，拒绝 `RPC_E_CHANGED_MODE`）；`AvSetMmThreadCharacteristicsW("Pro Audio", &taskIndex)` 返回非空句柄且 `taskIndex != 0`；退出前严格配对 `CoUninitialize`。 |
 | **T0.3** | WASAPI 独占与排他性验证 | `cmd/spike/wasapi_spike.go` | Planned | 未开始 | 2.5 | 请求 `AUDCLNT_SHAREMODE_EXCLUSIVE` 打开默认设备并进入事件驱动推流循环。验收：<br>1. 独占打开成功，写入静音帧无卡顿；<br>2. 保持独占期间，由辅助进程尝试打开同一设备独占流，严格拦截并返回 `AUDCLNT_E_DEVICE_IN_USE`。 |
 | **T0.4** | 字节布局与端序测试 | `cmd/spike/pcm_layout_test.go` | Planned | 未开始 | 1 | 编写 16-bit、24-bit (packed 3-byte) 及 24-in-32 (小端对齐) 的内存布局测试。验收：通过预置已知序列与内存字节切片进行 `bytes.Equal` 逐字节比对，100% 一致。 |
@@ -107,18 +107,18 @@ flowchart TD
 
 ---
 
-### Phase 4：现代化 Wails v3 仪器界面
-> **阶段目标**：采用 Wails v3 构建专业暗黑工业仪器风 GUI，前后端严格通过 RPC 解耦，实现系统 WebView2 依赖自检、全功能控件暴露与 P99.9 渲染性能保障。
+### Phase 4：现代化 GIU 原生仪器界面
+> **阶段目标**：采用 GIU 构建专业暗黑工业仪器风原生 GUI，通过 UIService/Controller 分层保持低耦合，实现全功能控件暴露与 P99.9 渲染性能保障。
 
 | 任务 ID | 任务名称 | 责任文件 / 模块 | 计划状态 | 实际状态 | 工期(天) | 交付产物与量化验收指标 |
 | :--- | :--- | :--- | :---: | :---: | :---: | :--- |
-| **T4.1** | Wails v3 脚手架与环境自检 | `cmd/app/main.go`<br>`internal/platform/webview2.go` | Planned | 已完成 | 3 | 搭建 Wails v3 骨架，绑定 Go Controller。**前置自检**：启动时检测系统 Evergreen WebView2 Runtime，若缺失则弹出原生错误对话框阻止启动。验收：在无 WebView2 环境下安全提示，在正常环境下 2 秒内渲染出主界面。 |
-| **T4.2** | 设备与硬件协商面板 | `frontend/src/components/DeviceSelector.vue` | Planned | 已完成 | 2.5 | 声卡下拉选择、Exclusive 开关、展示实际协商打开的 SampleRate、BitDepth 与 BufferPeriod。验收：设备拔出/插入在 500ms 内触发 UI 状态更新并显示断连警告。 |
-| **T4.3** | 全功能信号源控制仪表盘 | `frontend/src/components/GeneratorPanel.vue` | Planned | 已完成 | 4 | **完整暴露所有已开发波形**：正弦、PolyBLEP 方波、PolyBLEP 三角波、扫频、高斯白噪、Voss 粉噪、多音/双音、DoP。提供双通道独立 dBFS 滑块。验收：参数调节响应流畅；非法输入（如超奈奎斯特频率）即时红框拦截并禁用启动按钮。 |
-| **T4.4** | 实时诊断与 P99.9 性能监控 | `frontend/src/components/DiagnosticsView.vue` | Planned | 已完成 | 3 | 10Hz 轮询展示状态机、Underrun、late callback、Render 执行耗时及位完美状态（Configured/Eligible/Verified/Unknown）。验收矩阵固定使用 10ms device period（48k/480、96k/960、192k/1920 frames），在记录了 CPU 型号、电源策略、压力工具和线程亲和性的参考机上运行 5 分钟：Render 执行耗时 P99.9 $<30\%$ BufferPeriod、最大值 $<70\%$ BufferPeriod、Underrun 为 0；唤醒迟到时间与 Render 用时分别统计。 |
-| **T4.5** | 全覆盖高危操作安全弹窗 | `frontend/src/components/SafetyModal.vue` | Planned | 已完成 | 2 | 针对超声波（$>20\text{kHz}$）、方波、多音高 Crest Factor 及 DoP 模式弹出强制警示，用户未手动确认前禁止解除静音。验收：弹窗拦截逻辑通过全部前端自动化用例。 |
+| **T4.1** | GIU 原生界面脚手架与启动自检 | `cmd/app-giu/main.go`<br>`internal/ui/giu/app.go` | Planned | 已完成 | 3 | 搭建 GIU 原生界面骨架，绑定 UIService 与 AppController。**启动自检**：初始化音频后端、设备监听和 UI 状态，确保失败时保持 OpenMuted。验收：Windows 10/11 环境下程序启动并在 2 秒内渲染出主界面。 |
+| **T4.2** | 设备与硬件协商面板 | `internal/ui/giu/device_panel.go` | Planned | 已完成 | 2.5 | 声卡下拉选择、Exclusive 开关、展示实际协商打开的 SampleRate、BitDepth 与 BufferPeriod。验收：设备拔出/插入在 500ms 内触发 UI 状态更新并显示断连警告。 |
+| **T4.3** | 全功能信号源控制仪表盘 | `internal/ui/giu/generator_panel.go` | Planned | 已完成 | 4 | **完整暴露所有已开发波形**：正弦、PolyBLEP 方波、PolyBLEP 三角波、扫频、高斯白噪、Voss 粉噪、多音/双音、DoP。提供双通道独立 dBFS 滑块。验收：参数调节响应流畅；非法输入（如超奈奎斯特频率）即时提示并禁用启动按钮。 |
+| **T4.4** | 实时诊断与 P99.9 性能监控 | `internal/ui/giu/diagnostics_panel.go` | Planned | 已完成 | 3 | 10Hz 轮询展示状态机、Underrun、late callback、Render 执行耗时及位完美状态（Configured/Eligible/Verified/Unknown）。验收矩阵固定使用 10ms device period（48k/480、96k/960、192k/1920 frames），在记录了 CPU 型号、电源策略、压力工具和线程亲和性的参考机上运行 5 分钟：Render 执行耗时 P99.9 $<30\%$ BufferPeriod、最大值 $<70\%$ BufferPeriod、Underrun 为 0；唤醒迟到时间与 Render 用时分别统计。 |
+| **T4.5** | 全覆盖高危操作安全弹窗 | `internal/ui/giu/app.go` | Planned | 已完成 | 2 | 针对超声波（$>20\text{kHz}$）、方波、多音高 Crest Factor 及 DoP 模式弹出强制警示，用户未手动确认前禁止解除静音。验收：弹窗拦截与“以后不再提示”持久化逻辑通过 Go UI 状态测试。 |
 | **T4.6** | 配置持久化与安全预设导入 | `internal/controller/preset.go` | Planned | 已完成 | 1.5 | JSON 格式保存/加载测试配置。验收：加载保存的预设后，**输出状态严格维持在 OpenMuted**，绝不自动开启有声输出。 |
-| **B4** | Phase 4 前端联调缓冲 | - | Planned | 已完成 | 3 | 用于 Wails v3 IPC 吞吐调优与暗黑仪器主题 UI 细节打磨。 |
+| **B4** | Phase 4 UI 联调缓冲 | - | Planned | 已完成 | 3 | 用于 GIU 原生控件、主题和暗黑仪器风 UI 细节打磨。 |
 
 ---
 
@@ -131,7 +131,7 @@ flowchart TD
 | **T5.2** | ASIO PCM 直通与延迟实测 | `internal/audio/asio/stream_windows.go` | Planned | 已完成 | 3.5 | 实现 `AudioBackend` 的 ASIO 版本。在 64/128/256-frame 缓冲下分别记录 `ASIOGetLatencies` 的输入/输出报告值、硬件回环实测往返延迟、固定转换器偏移和重复测量抖动。验收：固定配置重复 100 次时延迟测量标准差不超过 1 样本，连续推流 10 分钟零 Underrun；不把跨厂商“报告值与实测值差 1 样本”作为统一硬门槛。 |
 | **T5.3** | Native DSD 原生直通 | `internal/audio/asio/dsd_stream.go` | Planned | 已完成 | 4 | 协商 ASIO DSD sample type，基准支持 **DSD256 (11.2896MHz)**，驱动允许时可选扩展 **DSD512 (22.5792MHz)**。ASIO 按通道提供独立缓冲，不按 PCM 方式交织；必须针对驱动报告的 `ASIOSTDSDInt8LSB1`、`ASIOSTDSDInt8MSB1` 或 `ASIOSTDSDInt8NER8` 分别实现逐通道 bit-order 转换和 Golden Vector 测试，无 DoP marker。 |
 | **T5.4** | 多厂商驱动兼容性测试 | `test/asio_compat_test.go` | Planned | 已完成 | 3 | 使用明确记录版本的 Thesycon、Yamaha/Steinberg 等厂商驱动验证 PCM 与其实际支持的 Native DSD；ASIO4ALL 仅作为 WDM-to-ASIO PCM 兼容路径测试，不作为 Native DSD 证明。验收：驱动切换与重置无死锁、无进程 Crash，并输出设备/驱动/格式兼容矩阵。 |
-| **T5.5** | ASIO 与 Native DSD GUI 集成 | `frontend/src/components/AsioPanel.vue` | Planned | 已完成 | 2 | 在前端增加 ASIO 驱动控制面板（时钟源、sample type、Native DSD 模式与不可跳过的首次安全警告）。验收：所有参数经 Controller 校验后生效，绕过前端直接调用 RPC 也不能跳过安全守卫。 |
+| **T5.5** | ASIO 与 Native DSD GUI 集成 | `internal/ui/giu/device_panel.go`<br>`internal/ui/giu/app.go` | Planned | 已完成 | 2 | 在 GIU 设备面板增加 ASIO 驱动控制（时钟源、sample type、Native DSD 模式与不可跳过的首次安全警告）。验收：所有参数经 Controller 校验后生效，绕过 UI 直接调用服务也不能跳过安全守卫。 |
 | **T5.6** | ASIO 8 小时全栈长稳测试 | `test/asio_soak_test.go` | Planned | 已完成 | 2 | 在 T5.5 GUI 集成完成后，对最终 Phase 5 全栈执行 8 小时 ASIO 推流。验收：参考设备和固定 buffer 配置下 Underrun 为 0，Windows 句柄净增长为 0，内存及 goroutine 数量无持续单调增长。 |
 | **B5** | Phase 5 驱动适配缓冲 | - | Planned | 已完成 | 3 | 用于处理各厂商 ASIO 专有驱动内部非标回调的兼容性补丁。 |
 
@@ -144,10 +144,10 @@ flowchart TD
 | :--- | :--- | :--- | :---: | :---: | :---: | :--- |
 | **T6.1** | 采集回路与时钟漂移校准 | `internal/audio/capture_windows.go`<br>`internal/analysis/sync.go` | Planned | 未开始 | 4.5 | 抽象音频录音采集端。**双时钟域算法验收指标**：<br>1. 起始延迟估计：通过 Chirp 互相关算法估计，延迟误差 $\le 2$ 样本；<br>2. **算法漂移估计精度**：在人工注入 $\pm 50\text{ ppm}$ 时钟偏差的验证集下，系统计算出的时钟漂移误差 $\le \pm 1\text{ ppm}$；校正后时间残差 $\le 0.1$ 样本。 |
 | **T6.2** | 全指标分析与 REW 标定 | `internal/analysis/fft.go`<br>`internal/analysis/thd.go`<br>`internal/analysis/report.go` | Planned | 未开始 | 5 | 支持 THD、THD+N、SNR、IMD (SMPTE/CCIF)、通道串扰，支持导入麦克风/ADC 校准文件 (.cal/.txt)，支持导出 PDF/CSV 测试报告。**量化标定验收**：输入 24-bit 96kHz 标准参考 WAV，本系统与 REW 结果对比：THD+N 差异 $\le 0.2\text{ dB}$，频响差异 $\le 0.05\text{ dB}$。 |
-| **T6.3** | 便携包与安装包发布构建 | `build/` | Planned | 未开始 | 3 | 编写 Inno Setup 脚本生成带 WebView2 Bootstrapper 的在线安装包，并打包免安装便携 zip。验收分为：<br>1. 无 WebView2、有网络：安装包能够引导安装运行时并启动；<br>2. 已安装 WebView2、无网络：安装包和便携包均可启动；<br>3. 无 WebView2、无网络：便携包必须给出明确前置条件错误，不得静默失败。 |
+| **T6.3** | 便携包与安装包发布构建 | `build/` | Planned | 未开始 | 3 | 编写 Inno Setup 脚本生成标准安装包，并打包免安装便携 zip。验收分为：<br>1. 全新 Windows 10/11 x64 环境：安装包能够完成安装并启动；<br>2. 无网络环境：已解压便携包可以直接启动；<br>3. 卸载器能够清理程序文件并保留用户数据。 |
 | **T6.4** | 24 小时极限 Soak Test | `test/soak_24h_test.go` | Planned | 未开始 | 2.5 | 自动化 24 小时老化测试。预热 10 分钟后，每小时执行一次受控 GC 并采样活跃堆、goroutine、COM 对象和 OS 句柄；后 12 小时 retained heap 线性回归斜率目标 $<64\text{ KiB/hour}$，goroutine 与句柄净增长为 0，Underrun 为 0。不得用单次 `HeapAlloc` 差值或“0 bytes/hour”作为唯一泄漏证明。 |
 | **T6.5** | 用户手册与第三方法律声明 | `docs/manual/`<br>`LICENSE_THIRD_PARTY.md` | Planned | 未开始 | 2 | 编写完整用户使用手册、高危超声/方波安全操作指引；打包整理 Steinberg ASIO SDK 许可声明与开源第三方依赖声明。验收：文档齐备无遗漏。 |
-| **T6.6** | 供应链、签名与发布流水线 | `scripts/release.ps1`<br>`docs/release/` | Planned | 未开始 | 1.5 | 锁定 Go/Wails/前端依赖，生成 SBOM 与第三方许可证清单；使用 `SignTool` 和 RFC 3161 时间戳签名 exe、安装包及卸载器，生成 SHA-256 发布清单。验收：签名链验证通过，最终签名后的 installer/portable 制品重新执行安装、启动、卸载与基础音频 smoke test，并保存可回滚的发布制品和已知限制说明。 |
+| **T6.6** | 供应链、签名与发布流水线 | `scripts/release.ps1`<br>`docs/release/` | Planned | 未开始 | 1.5 | 锁定 Go/GIU 依赖，生成 SBOM 与第三方许可证清单；使用 `SignTool` 和 RFC 3161 时间戳签名 exe、安装包及卸载器，生成 SHA-256 发布清单。验收：签名链验证通过，最终签名后的 installer/portable 制品重新执行安装、启动、卸载与基础音频 smoke test，并保存可回滚的发布制品和已知限制说明。 |
 | **B6** | Phase 6 终审与发布缓冲 | - | Planned | 未开始 | 2.5 | 用于发布前全回归测试与未知 Bug 修复。 |
 
 ---
@@ -201,8 +201,8 @@ gantt
     T3.6 PCM位完美外部验证 (Planned)   :p3_6, after p3_5, 2d
     B3   Phase 3 缓冲 (Planned)        :p3_b, after p3_6, 2.5d
 
-    section Phase 4: Wails v3 界面 (19d)
-    T4.1 Wails脚手架与自检 (Planned)   :p4_1, after p3_b, 3d
+    section Phase 4: GIU 原生界面 (19d)
+    T4.1 GIU脚手架与自检 (Planned)   :p4_1, after p3_b, 3d
     T4.2 设备硬件协商面板 (Planned)    :p4_2, after p4_1, 2.5d
     T4.3 全功能信号源面板 (Planned)    :p4_3, after p4_2, 4d
     T4.4 P99.9性能监控 (Planned)       :p4_4, after p4_3, 3d
@@ -261,7 +261,7 @@ gantt
   5. PCM 已知伪随机序列通过可信数字捕获逐样本比较，证据归档完整；
   6. 未经 CLI 显式风险确认前，系统强制保持 OpenMuted 状态。
 * **Gate 4 (P4→P5)**：
-  1. 启动时具备缺失 WebView2 Runtime 的拦截与友好弹窗阻断能力；
+  1. 原生 GIU 界面在 Windows 10/11 x64 环境可稳定启动并完成设备初始化；
   2. 暴露全部已开发的波形控件与全覆盖高危确认弹窗；位完美状态能够显示 Configured、Eligible、Verified 和 Unknown；
   3. 在 50% CPU 负载压力下连续运行 5 分钟：**P99.9 分位数渲染延迟 $<30\%$ BufferPeriod，最大单次延迟 $<70\%$ BufferPeriod，Underrun 计数为 0**；
   4. 配置导入后默认处于 OpenMuted 状态。
@@ -275,6 +275,6 @@ gantt
   1. 在人工注入 $\pm 50\text{ ppm}$ 偏差下，双时钟域漂移估计误差 $\le \pm 1\text{ ppm}$，校正后时间残差 $\le 0.1$ 样本；
   2. 标准基准 WAV 离线分析与 REW 对比误差：THD+N $\le 0.2\text{ dB}$，频响 $\le 0.05\text{ dB}$；
   3. 自动化 24 小时极限 Soak Test：受控 GC 后 retained heap 趋势满足阈值，goroutine 与句柄净增长为 0，零 Underrun；
-  4. WebView2 在线安装、已具备运行时的离线安装/便携运行、缺失运行时的明确失败提示三类场景均通过；
+  4. 标准安装包、免安装便携包与卸载流程在全新 Windows 10/11 x64 环境均通过；
   5. 用户手册、安全指引、SBOM、第三方许可和已知限制齐备；
   6. 最终 installer、portable exe 与卸载器均完成 RFC 3161 时间戳签名和 SHA-256 归档，签名后重新通过安装、启动、基础音频、卸载 smoke test。

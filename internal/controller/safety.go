@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -29,14 +32,23 @@ type SafetyAssessment struct {
 
 // SafetyManager tracks risk evaluations and explicit user confirmations.
 type SafetyManager struct {
-	mu           sync.Mutex
-	confirmedRisks map[SafetyRiskCategory]bool
+	mu              sync.Mutex
+	confirmedRisks  map[SafetyRiskCategory]bool
+	suppressedRisks map[SafetyRiskCategory]bool
+}
+
+const safetyPreferencesVersion = 1
+
+type safetyPreferencesFile struct {
+	Version    int                         `json:"version"`
+	Suppressed map[SafetyRiskCategory]bool `json:"suppressed"`
 }
 
 // NewSafetyManager creates a safety manager with empty confirmation cache.
 func NewSafetyManager() *SafetyManager {
 	return &SafetyManager{
-		confirmedRisks: make(map[SafetyRiskCategory]bool),
+		confirmedRisks:  make(map[SafetyRiskCategory]bool),
+		suppressedRisks: make(map[SafetyRiskCategory]bool),
 	}
 }
 
@@ -47,7 +59,7 @@ func (sm *SafetyManager) Assess(req ExtendedSignalRequest) SafetyAssessment {
 
 	// 1. DoP Risk (Highest Priority)
 	if req.Waveform == WaveformDoP {
-		confirmed := sm.confirmedRisks[RiskDoP]
+		confirmed := sm.isConfirmedLocked(RiskDoP)
 		return SafetyAssessment{
 			HasRisk:              true,
 			Category:             RiskDoP,
@@ -76,7 +88,7 @@ func (sm *SafetyManager) Assess(req ExtendedSignalRequest) SafetyAssessment {
 	}
 
 	if isUltrasound {
-		confirmed := sm.confirmedRisks[RiskUltrasound]
+		confirmed := sm.isConfirmedLocked(RiskUltrasound)
 		return SafetyAssessment{
 			HasRisk:              true,
 			Category:             RiskUltrasound,
@@ -89,7 +101,7 @@ func (sm *SafetyManager) Assess(req ExtendedSignalRequest) SafetyAssessment {
 
 	// 3. PolyBLEP Square Wave Risk
 	if req.Waveform == WaveformPolyBlepSquare {
-		confirmed := sm.confirmedRisks[RiskSquareWave]
+		confirmed := sm.isConfirmedLocked(RiskSquareWave)
 		return SafetyAssessment{
 			HasRisk:              true,
 			Category:             RiskSquareWave,
@@ -102,7 +114,7 @@ func (sm *SafetyManager) Assess(req ExtendedSignalRequest) SafetyAssessment {
 
 	// 4. Multitone / High Crest Factor Risk
 	if req.Waveform == WaveformMultitoneSMPTE || req.Waveform == WaveformMultitoneCCIF || req.Waveform == WaveformMultitoneCustom {
-		confirmed := sm.confirmedRisks[RiskMultitoneHighCrest]
+		confirmed := sm.isConfirmedLocked(RiskMultitoneHighCrest)
 		return SafetyAssessment{
 			HasRisk:              true,
 			Category:             RiskMultitoneHighCrest,
@@ -132,14 +144,121 @@ func (sm *SafetyManager) Confirm(category SafetyRiskCategory, confirmed bool) {
 func (sm *SafetyManager) IsConfirmed(category SafetyRiskCategory) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	return sm.confirmedRisks[category]
+	return sm.isConfirmedLocked(category)
 }
 
-// Reset clears all user confirmations.
+func (sm *SafetyManager) isConfirmedLocked(category SafetyRiskCategory) bool {
+	return sm.confirmedRisks[category] || sm.suppressedRisks[category]
+}
+
+// IsSuppressed reports whether the user permanently disabled prompts for a
+// risk category on this machine.
+func (sm *SafetyManager) IsSuppressed(category SafetyRiskCategory) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.suppressedRisks[category]
+}
+
+// Suppress records a permanent acknowledgement and persists it to the default
+// user configuration directory.
+func (sm *SafetyManager) Suppress(category SafetyRiskCategory) error {
+	path, err := defaultSafetyPreferencesPath()
+	if err != nil {
+		return err
+	}
+	return sm.suppressToFile(category, path)
+}
+
+func (sm *SafetyManager) suppressToFile(category SafetyRiskCategory, path string) error {
+	sm.mu.Lock()
+	sm.suppressedRisks[category] = true
+	sm.confirmedRisks[category] = true
+	snapshot := make(map[SafetyRiskCategory]bool, len(sm.suppressedRisks))
+	for risk, suppressed := range sm.suppressedRisks {
+		if suppressed {
+			snapshot[risk] = true
+		}
+	}
+	sm.mu.Unlock()
+
+	return saveSafetyPreferences(path, snapshot)
+}
+
+// LoadSafetyPreferences loads non-blocking prompt suppressions from the default
+// user configuration directory. A missing file is not an error.
+func (sm *SafetyManager) LoadSafetyPreferences() error {
+	path, err := defaultSafetyPreferencesPath()
+	if err != nil {
+		return err
+	}
+	return sm.loadSafetyPreferences(path)
+}
+
+func (sm *SafetyManager) loadSafetyPreferences(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read safety preferences: %w", err)
+	}
+
+	var prefs safetyPreferencesFile
+	if err := json.Unmarshal(data, &prefs); err != nil {
+		return fmt.Errorf("parse safety preferences: %w", err)
+	}
+	if prefs.Version != safetyPreferencesVersion {
+		return fmt.Errorf("unsupported safety preferences version %d", prefs.Version)
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for risk, suppressed := range prefs.Suppressed {
+		if suppressed {
+			sm.suppressedRisks[risk] = true
+			sm.confirmedRisks[risk] = true
+		}
+	}
+	return nil
+}
+
+func saveSafetyPreferences(path string, suppressed map[SafetyRiskCategory]bool) error {
+	data, err := json.MarshalIndent(safetyPreferencesFile{
+		Version:    safetyPreferencesVersion,
+		Suppressed: suppressed,
+	}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal safety preferences: %w", err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create safety preferences directory: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write safety preferences: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace safety preferences: %w", err)
+	}
+	return nil
+}
+
+func defaultSafetyPreferencesPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config directory: %w", err)
+	}
+	return filepath.Join(dir, "SoundCardTestWaveformGenerator", "safety.json"), nil
+}
+
+// Reset clears all session confirmations and permanent suppressions.
 func (sm *SafetyManager) Reset() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.confirmedRisks = make(map[SafetyRiskCategory]bool)
+	sm.suppressedRisks = make(map[SafetyRiskCategory]bool)
 }
 
 // ValidateConfirmation checks whether the required risk confirmation has been satisfied.

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"sound-signal-generator/internal/audio"
 	"sound-signal-generator/internal/audio/asio/bridge"
 	"sound-signal-generator/internal/dsd"
 )
@@ -133,7 +134,7 @@ func TestNativeDSDStreamPlanarBitOrderAndSilenceLayout(t *testing.T) {
 		t.Fatalf("right LSB1 layout mismatch: % x", right)
 	}
 
-	if err := stream.ReleaseBuffer(16, 0x01); err != nil {
+	if err := stream.ReleaseBuffer(16, audio.StreamFlagSilent); err != nil {
 		t.Fatalf("silent ReleaseBuffer failed: %v", err)
 	}
 	if !bytes.Equal(driver.WrittenDSDBuffer(0, 0), []byte{0x69, 0x69}) {

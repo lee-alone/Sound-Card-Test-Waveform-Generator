@@ -181,6 +181,7 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	if contentW < px(220) {
 		contentW = px(220)
 	}
+	streamLocked := p.state.IsOutputRunning()
 
 	currentDevPreview := "未发现设备"
 	if int(p.state.SelectedDeviceIndex) >= 0 && int(p.state.SelectedDeviceIndex) < len(p.state.DeviceNames) {
@@ -204,19 +205,28 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 			p.uiService.SetExclusiveMode(p.state.IsExclusive)
 			p.onFormatChanged()
 		})
+	exclusiveControl = disableWhen(streamLocked, exclusiveControl)
 	var trimControl g.Widget = g.SliderFloat(&p.state.MasterTrimDB, -6.0, 6.0).
 		Format("%+.1f dB").
 		Size(px(112)).
 		OnChange(p.onFormatChanged)
+	rateCaption := "采样率"
+	formatCaption := "样本格式"
+	if streamLocked {
+		rateCaption += "  ·  输出中已锁定"
+		formatCaption += "  ·  输出中已锁定"
+	}
 	formatControls := []g.Widget{
-		captionLabel("采样率"),
-		g.Combo("##rateCombo", SampleRateLabels[rateIndex], SampleRateLabels, &p.state.SelectedSampleRateIndex).
-			Size(contentW).
-			OnChange(p.onFormatChanged),
-		captionLabel("样本格式"),
-		g.Combo("##fmtCombo", SampleFormatLabels[formatIndex], SampleFormatLabels, &p.state.SelectedSampleFormatIndex).
-			Size(contentW).
-			OnChange(p.onFormatChanged),
+		captionLabel(rateCaption),
+		disableWhen(streamLocked,
+			g.Combo("##rateCombo", SampleRateLabels[rateIndex], SampleRateLabels, &p.state.SelectedSampleRateIndex).
+				Size(contentW).
+				OnChange(p.onFormatChanged)),
+		captionLabel(formatCaption),
+		disableWhen(streamLocked,
+			g.Combo("##fmtCombo", SampleFormatLabels[formatIndex], SampleFormatLabels, &p.state.SelectedSampleFormatIndex).
+				Size(contentW).
+				OnChange(p.onFormatChanged)),
 	}
 
 	if isDoP {
@@ -241,17 +251,18 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 		g.Separator(),
 		captionLabel("输出设备"),
 		g.Row(
-			g.Combo("##devCombo", currentDevPreview, p.state.DeviceNames, &p.state.SelectedDeviceIndex).
-				Size(deviceComboW).
-				OnChange(func() {
-					if int(p.state.SelectedDeviceIndex) >= 0 && int(p.state.SelectedDeviceIndex) < len(p.state.DeviceIDs) {
-						p.state.ResetNativeDSDSession()
-						_ = p.uiService.SelectDevice(p.state.DeviceIDs[p.state.SelectedDeviceIndex])
-						p.RefreshAsioStatus()
-						p.onFormatChanged()
-					}
-				}),
-			StyleQuietButton(g.Button("刷新").Size(px(82), px(32)).OnClick(p.RefreshDevices)),
+			disableWhen(streamLocked,
+				g.Combo("##devCombo", currentDevPreview, p.state.DeviceNames, &p.state.SelectedDeviceIndex).
+					Size(deviceComboW).
+					OnChange(func() {
+						if int(p.state.SelectedDeviceIndex) >= 0 && int(p.state.SelectedDeviceIndex) < len(p.state.DeviceIDs) {
+							p.state.ResetNativeDSDSession()
+							_ = p.uiService.SelectDevice(p.state.DeviceIDs[p.state.SelectedDeviceIndex])
+							p.RefreshAsioStatus()
+							p.onFormatChanged()
+						}
+					})),
+			StyleQuietButton(g.Button("刷新").Size(px(82), px(32)).Disabled(streamLocked).OnClick(p.RefreshDevices)),
 		),
 		captionLabel(truncateText(currentDevPreview, 44)),
 		g.Row(
@@ -295,19 +306,20 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 			),
 			captionLabel(fmt.Sprintf("缓冲范围 [%d, %d]，当前 %d；驱动 %s", status.BufferSizes.MinSize, status.BufferSizes.MaxSize, status.ActiveBufferSize, status.DriverVersion)),
 			captionLabel("硬件时钟源"),
-			g.Combo("##asioClock", clockPreview, clockLabels, &p.state.SelectedClockIndex).
-				Size(contentW).
-				OnChange(func() {
-					if err := p.uiService.SetAsioClockSource(int(p.state.SelectedClockIndex)); err != nil {
-						p.state.NativeDSDError = err.Error()
-					} else {
-						p.RefreshAsioStatus()
-					}
-				}),
+			disableWhen(streamLocked,
+				g.Combo("##asioClock", clockPreview, clockLabels, &p.state.SelectedClockIndex).
+					Size(contentW).
+					OnChange(func() {
+						if err := p.uiService.SetAsioClockSource(int(p.state.SelectedClockIndex)); err != nil {
+							p.state.NativeDSDError = err.Error()
+						} else {
+							p.RefreshAsioStatus()
+						}
+					})),
 			g.Row(
 				captionLabel("缓冲帧数"),
-				g.InputInt(&p.state.AsioBufferSize).Size(px(104)).StepSize(64),
-				StyleQuietButton(g.Button("应用").Size(px(76), px(30)).OnClick(func() {
+				disableWhen(streamLocked, g.InputInt(&p.state.AsioBufferSize).Size(px(104)).StepSize(64)),
+				StyleQuietButton(g.Button("应用").Size(px(76), px(30)).Disabled(streamLocked).OnClick(func() {
 					if err := p.uiService.SetAsioBufferSize(int(p.state.AsioBufferSize)); err != nil {
 						p.state.NativeDSDError = err.Error()
 					} else {
@@ -377,7 +389,7 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	widgets = append(widgets,
 
 		g.Row(
-			StylePrimaryButton(g.Button(probeText).Size(contentW-px(108), px(34)).Disabled(p.state.IsProbing).OnClick(p.RunProbe)),
+			StylePrimaryButton(g.Button(probeText).Size(contentW-px(108), px(34)).Disabled(p.state.IsProbing || streamLocked).OnClick(p.RunProbe)),
 			g.Spacing(),
 			func() g.Widget {
 				if p.state.ShowProbeResults && len(p.state.ProbeResults) > 0 {
@@ -399,15 +411,17 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 			supported := result.Status.String() == "Supported"
 			label := fmt.Sprintf("%.1f kHz  /  %s", float64(targetRate)/1000.0, targetFmt.String())
 
-			if supported && !p.state.IsDoPSelected() {
+			if supported && !p.state.IsDoPSelected() && !streamLocked {
 				widgets = append(widgets,
 					StyleQuietButton(g.Button(label).Size(contentW, px(28)).OnClick(func() {
 						applyProbeFormat(p.state, targetRate, targetFmt)
 						p.onFormatChanged()
 					})),
 				)
-			} else if supported {
+			} else if supported && p.state.IsDoPSelected() {
 				widgets = append(widgets, fontLabel(label+"  [DoP 参数锁定]", 10.5, ColorTextDim))
+			} else if supported && streamLocked {
+				widgets = append(widgets, fontLabel(label+"  [输出中已锁定]", 10.5, ColorTextDim))
 			} else {
 				widgets = append(widgets, fontLabel(label+"  [不支持]", 10.5, ColorTextDim))
 			}
@@ -422,6 +436,13 @@ func (p *DevicePanel) Build(width, height float32) g.Widget {
 	}
 
 	return scrollPanel(width, height, ColorSurface, widgets...)
+}
+
+func disableWhen(disabled bool, widget g.Widget) g.Widget {
+	if !disabled {
+		return widget
+	}
+	return g.Style().SetDisabled(true).To(widget)
 }
 
 func applyProbeFormat(state *UIState, rate int, format audio.SampleFormat) {

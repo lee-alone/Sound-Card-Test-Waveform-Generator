@@ -169,8 +169,7 @@ func (s *Stream) ReleaseBuffer(numFramesWritten int, flags uint32) error {
 		return errors.New("stream closed")
 	}
 
-	// Handle silent flag (0x01 = AUDCLNT_BUFFERFLAGS_SILENT)
-	if flags&0x01 != 0 {
+	if flags&audio.StreamFlagSilent != 0 {
 		for i := range s.stagingBuffer {
 			s.stagingBuffer[i] = 0
 		}

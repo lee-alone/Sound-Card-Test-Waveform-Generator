@@ -5,7 +5,7 @@ import (
 	"sound-signal-generator/internal/audio"
 )
 
-// UIService provides the RPC boundary between Wails v3 frontend and AppController.
+// UIService provides the UI-facing boundary between the desktop UI and AppController.
 // Adheres strictly to the low-coupling principle: only UI-relevant methods are exposed.
 type UIService struct {
 	ctrl *AppController
@@ -86,6 +86,16 @@ func (s *UIService) CheckSafety(req ExtendedSignalRequest) SafetyAssessment {
 // ConfirmSafety acknowledges a hazard category.
 func (s *UIService) ConfirmSafety(category string, confirmed bool) {
 	s.ctrl.ConfirmSafety(SafetyRiskCategory(category), confirmed)
+}
+
+// SuppressSafety saves a permanent "do not ask again" choice for one category.
+func (s *UIService) SuppressSafety(category string) error {
+	return s.ctrl.SuppressSafety(SafetyRiskCategory(category))
+}
+
+// LoadSafetyPreferences restores persisted prompt suppressions.
+func (s *UIService) LoadSafetyPreferences() error {
+	return s.ctrl.LoadSafetyPreferences()
 }
 
 // SavePreset persists current test configuration into a JSON preset file.

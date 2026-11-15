@@ -7,6 +7,7 @@ import (
 
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/engine"
 )
 
 // DiagnosticsPanel is the compact real-time health strip beneath the working
@@ -22,6 +23,7 @@ func NewDiagnosticsPanel(uiService *controller.UIService, state *UIState) *Diagn
 
 func (p *DiagnosticsPanel) PollMetrics() {
 	p.state.Diagnostics = p.uiService.GetDiagnostics()
+	p.state.IsActiveStream = p.state.Diagnostics.State == engine.StateRunning
 	if p.state.IsAsioSelected() {
 		if status, err := p.uiService.GetAsioStatus(); err == nil {
 			p.state.AsioStatus = status

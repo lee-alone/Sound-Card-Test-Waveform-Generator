@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,11 +10,19 @@ import (
 	"sound-signal-generator/internal/engine"
 )
 
-// ConfigureExtendedSignal validates parameters, enforces safety checks, and configures engine & generator.
-// Safe invariant: Leaves engine in StatePrimed or StateOpenMuted, never starts playback.
+// ErrOutputFormatLocked prevents the physical stream format from changing
+// underneath an active render loop. DSP-only parameters remain live-editable.
+var ErrOutputFormatLocked = errors.New("output sample rate and sample format are locked while playback is running; stop output before changing them")
+
+// ConfigureExtendedSignal validates parameters, enforces safety checks, and
+// configures the engine and generator. DSP-only changes are applied to an
+// active stream in place; format-changing paths resume automatically only when
+// playback was already running, preserving the operator's intent.
 func (c *AppController) ConfigureExtendedSignal(req ExtendedSignalRequest) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	wasRunning := c.engine.State() == engine.StateRunning
 
 	// 1. Check safety confirmation
 	if err := c.safetyManager.ValidateConfirmation(req); err != nil {
@@ -60,8 +69,25 @@ func (c *AppController) ConfigureExtendedSignal(req ExtendedSignalRequest) error
 		c.mu.Lock()
 		if err == nil {
 			c.extendedRequest = req
+			if wasRunning {
+				if resumeErr := c.engine.Start(); resumeErr != nil {
+					err = fmt.Errorf("resume DoP playback after reconfiguration: %w", resumeErr)
+				}
+			}
 		}
 		return err
+	}
+
+	// A PCM waveform or frequency change does not require touching the audio
+	// device. Swap the prepared DSP generator atomically so the active stream
+	// continues without a silent Primed state or a manual stop/start.
+	if c.engine.State() == engine.StateRunning && c.extendedRequest.Waveform != WaveformDoP {
+		if c.currentRequest.SampleRate != req.SampleRate ||
+			c.currentRequest.SampleFormat != req.SampleFormat ||
+			c.currentRequest.Channels != req.Channels {
+			return ErrOutputFormatLocked
+		}
+		return c.replaceRunningPCMGeneratorLocked(req)
 	}
 
 	// 3. Create base DSP generator
@@ -122,6 +148,44 @@ func (c *AppController) ConfigureExtendedSignal(req ExtendedSignalRequest) error
 		DCOffset:     req.DCOffset,
 	}
 
+	// Format-changing transitions (DoP <-> PCM, device changes, native DSD
+	// exit) necessarily rebuild the stream. Preserve the operator's intent by
+	// resuming automatically instead of leaving the new stream silently primed.
+	if wasRunning {
+		if err := c.engine.Start(); err != nil {
+			return fmt.Errorf("resume playback after reconfiguration: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// replaceRunningPCMGeneratorLocked rebuilds only the DSP source and channel
+// trim wrapper. The device stream, clock, buffer and negotiated format remain
+// untouched, so waveform, frequency and sweep edits are audible immediately.
+func (c *AppController) replaceRunningPCMGeneratorLocked(req ExtendedSignalRequest) error {
+	baseGen, err := c.generatorFactory.CreateGenerator(req)
+	if err != nil {
+		return fmt.Errorf("failed to create waveform generator: %w", err)
+	}
+	scaledGen := NewChannelScaleGenerator(baseGen, req.LeftVolumeDBFS, req.RightVolumeDBFS)
+	if err := c.engine.ReplaceGenerator(scaledGen); err != nil {
+		return fmt.Errorf("replace running waveform generator: %w", err)
+	}
+
+	c.activeGenerator = scaledGen
+	normalizedPCM := req
+	c.lastPCMRequest = &normalizedPCM
+	c.extendedRequest = req
+	c.currentRequest = SignalRequest{
+		DeviceID:     req.DeviceID,
+		SampleRate:   req.SampleRate,
+		SampleFormat: req.SampleFormat,
+		Channels:     req.Channels,
+		Frequency:    req.Frequency,
+		Amplitude:    req.Amplitude,
+		DCOffset:     req.DCOffset,
+	}
 	return nil
 }
 
@@ -207,6 +271,16 @@ func (c *AppController) ConfirmSafety(category SafetyRiskCategory, confirmed boo
 	if category == RiskDoP && confirmed {
 		c.dopGuard.ConfirmViaFlag(true)
 	}
+}
+
+// LoadSafetyPreferences restores permanent "do not ask again" choices.
+func (c *AppController) LoadSafetyPreferences() error {
+	return c.safetyManager.LoadSafetyPreferences()
+}
+
+// SuppressSafety permanently disables prompts for one risk category.
+func (c *AppController) SuppressSafety(category SafetyRiskCategory) error {
+	return c.safetyManager.Suppress(category)
 }
 
 // SafetyManager returns the safety manager.
