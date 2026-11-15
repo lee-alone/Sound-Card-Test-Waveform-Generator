@@ -14,15 +14,15 @@ type mockBackendWithDoP struct {
 	dev *mockDoPDeviceForCtrl
 }
 
-func (m *mockBackendWithDoP) Type() audio.BackendType              { return audio.BackendWASAPI }
-func (m *mockBackendWithDoP) Initialize() error                    { return nil }
-func (m *mockBackendWithDoP) Close() error                         { return nil }
+func (m *mockBackendWithDoP) Type() audio.BackendType { return audio.BackendWASAPI }
+func (m *mockBackendWithDoP) Initialize() error       { return nil }
+func (m *mockBackendWithDoP) Close() error            { return nil }
 func (m *mockBackendWithDoP) EnumerateDevices() ([]audio.DeviceInfo, error) {
 	return []audio.DeviceInfo{
 		{ID: "dop-device-1", Name: "DoP Capable DAC", Flow: audio.FlowRender, State: audio.StateActive, IsDefault: true},
 	}, nil
 }
-func (m *mockBackendWithDoP) GetDefaultDevice() (audio.Device, error) { return m.dev, nil }
+func (m *mockBackendWithDoP) GetDefaultDevice() (audio.Device, error)   { return m.dev, nil }
 func (m *mockBackendWithDoP) GetDevice(id string) (audio.Device, error) { return m.dev, nil }
 
 type mockDoPDeviceForCtrl struct {
@@ -52,11 +52,11 @@ type mockCtrlDoPStream struct {
 	format audio.AudioFormat
 }
 
-func (s *mockCtrlDoPStream) Start() error                                        { return nil }
-func (s *mockCtrlDoPStream) Stop() error                                         { return nil }
-func (s *mockCtrlDoPStream) GetBuffer(numFrames int) (uintptr, error)            { return 0, nil }
+func (s *mockCtrlDoPStream) Start() error                                           { return nil }
+func (s *mockCtrlDoPStream) Stop() error                                            { return nil }
+func (s *mockCtrlDoPStream) GetBuffer(numFrames int) (uintptr, error)               { return 0, nil }
 func (s *mockCtrlDoPStream) ReleaseBuffer(numFramesWritten int, flags uint32) error { return nil }
-func (s *mockCtrlDoPStream) GetBufferSize() (uint32, error)                      { return 1764, nil }
+func (s *mockCtrlDoPStream) GetBufferSize() (uint32, error)                         { return 1764, nil }
 func (s *mockCtrlDoPStream) GetDevicePeriod() (time.Duration, time.Duration, error) {
 	return 10 * time.Millisecond, 5 * time.Millisecond, nil
 }
@@ -65,7 +65,7 @@ func (s *mockCtrlDoPStream) Close() error           { return nil }
 
 func TestConfigureDoPEnforcesSafetyGuard(t *testing.T) {
 	mockDev := &mockDoPDeviceForCtrl{}
-	ctrl := NewAppController(&mockBackendWithDoP{dev: mockDev})
+	ctrl := newTestAppController(&mockBackendWithDoP{dev: mockDev})
 	_ = ctrl.Initialize()
 	_ = ctrl.SelectDevice("dop-device-1")
 	defer ctrl.Close()
@@ -97,6 +97,7 @@ func TestConfigureDoPEnforcesSafetyGuard(t *testing.T) {
 	}
 
 	// 3. Valid DSD64 configuration
+	req.SampleFormat = audio.SampleFormat16Int // caller-supplied format must be overridden
 	err = ctrl.ConfigureDoP(req)
 	if err != nil {
 		t.Fatalf("unexpected error configuring DoP: %v", err)
@@ -108,5 +109,33 @@ func TestConfigureDoPEnforcesSafetyGuard(t *testing.T) {
 
 	if mockDev.lastOpened.SampleRate != 176400 {
 		t.Errorf("expected 176400 carrier rate, got %d", mockDev.lastOpened.SampleRate)
+	}
+	if mockDev.lastOpened.SampleFormat != audio.SampleFormat24In32 {
+		t.Errorf("expected forced 24-in-32 container, got %s", mockDev.lastOpened.SampleFormat)
+	}
+}
+
+func TestNormalizeDoPRequestAppliesUnityGainAndCarrier(t *testing.T) {
+	req := DefaultExtendedSignalRequest()
+	req.Waveform = WaveformDoP
+	req.SampleRate = 48000
+	req.SampleFormat = audio.SampleFormat16Int
+	req.Channels = 1
+	req.Amplitude = 0.1
+	req.DCOffset = 0.25
+	req.LeftVolumeDBFS = -18
+	req.RightVolumeDBFS = -24
+	req.DoP.DSDFormat = dsd.DSD128
+
+	got := normalizeDoPRequest(req)
+
+	if got.SampleRate != 352800 || got.SampleFormat != audio.SampleFormat24In32 {
+		t.Errorf("unexpected DoP transport format: %d Hz / %s", got.SampleRate, got.SampleFormat)
+	}
+	if got.Channels != 2 || got.Amplitude != 1.0 || got.DCOffset != 0.0 {
+		t.Errorf("unexpected DoP gain/layout: channels=%d amp=%f dc=%f", got.Channels, got.Amplitude, got.DCOffset)
+	}
+	if got.LeftVolumeDBFS != 0.0 || got.RightVolumeDBFS != 0.0 {
+		t.Errorf("DoP volume must be unity, got L=%f R=%f", got.LeftVolumeDBFS, got.RightVolumeDBFS)
 	}
 }

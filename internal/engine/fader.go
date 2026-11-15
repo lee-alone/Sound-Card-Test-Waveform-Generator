@@ -1,5 +1,7 @@
 package engine
 
+import "sync"
+
 // FaderState represents the gain progression state of the fader.
 type FaderState int
 
@@ -27,6 +29,7 @@ func (s FaderState) String() string {
 
 // Fader provides click-free sample-accurate gain ramps between 0.0 and 1.0.
 type Fader struct {
+	mu          sync.Mutex
 	state       FaderState
 	currentGain float64
 	step        float64
@@ -42,16 +45,22 @@ func NewFader() *Fader {
 
 // State returns current fader operational state.
 func (f *Fader) State() FaderState {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.state
 }
 
 // CurrentGain returns the instantaneous gain factor [0.0, 1.0].
 func (f *Fader) CurrentGain() float64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.currentGain
 }
 
 // StartFadeIn initiates a smooth transition from current gain up to 1.0.
 func (f *Fader) StartFadeIn(sampleRate int, durationMs float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if durationMs < 5.0 {
 		durationMs = 5.0
 	} else if durationMs > 20.0 {
@@ -71,6 +80,8 @@ func (f *Fader) StartFadeIn(sampleRate int, durationMs float64) {
 
 // StartFadeOut initiates a smooth transition from current gain down to 0.0.
 func (f *Fader) StartFadeOut(sampleRate int, durationMs float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if durationMs < 5.0 {
 		durationMs = 5.0
 	} else if durationMs > 20.0 {
@@ -93,6 +104,8 @@ func (f *Fader) StartFadeOut(sampleRate int, durationMs float64) {
 
 // Mute immediately zeroes gain and sets state to FaderStateMuted.
 func (f *Fader) Mute() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.currentGain = 0.0
 	f.state = FaderStateMuted
 }
@@ -100,6 +113,8 @@ func (f *Fader) Mute() {
 // Apply applies the gain envelope to a slice of float64 samples.
 // Returns true if a fade-out completed during this buffer.
 func (f *Fader) Apply(samples []float64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	fadeOutFinished := false
 
 	switch f.state {
@@ -149,6 +164,8 @@ func (f *Fader) Apply(samples []float64) bool {
 
 // ApplyChannels applies the gain envelope identically across all channels.
 func (f *Fader) ApplyChannels(channels [][]float64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if len(channels) == 0 || len(channels[0]) == 0 {
 		return false
 	}

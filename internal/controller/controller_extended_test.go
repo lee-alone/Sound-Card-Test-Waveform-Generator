@@ -13,7 +13,7 @@ import (
 func setupTestController(t *testing.T) *AppController {
 	mockDev := &MockControllerDevice{stream: &MockControllerStream{bufferSize: 1920}}
 	backend := &MockBackend{device: mockDev}
-	ctrl := NewAppController(backend)
+	ctrl := newTestAppController(backend)
 	if err := ctrl.Initialize(); err != nil {
 		t.Fatalf("controller init failed: %v", err)
 	}
@@ -210,9 +210,6 @@ func TestController_10HzDiagnosticsReport(t *testing.T) {
 	_ = ctrl.StopPlayback()
 }
 
-
-
-
 func TestController_ReconfigureWhileRunning(t *testing.T) {
 	ctrl := setupTestController(t)
 	defer ctrl.Close()
@@ -325,6 +322,3 @@ func TestController_ReconfigureWhilePrimed(t *testing.T) {
 
 	_ = ctrl.StopPlayback()
 }
-
-
-

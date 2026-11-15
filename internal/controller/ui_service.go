@@ -45,7 +45,7 @@ func (s *UIService) ProbeDeviceCapabilities() ([]audio.FormatSupportResult, erro
 	if !s.ctrl.IsExclusiveMode() {
 		mode = audio.ShareModeShared
 	}
-	return dev.ProbeCapabilities(candidates, mode)
+	return s.ctrl.ProbeSelectedDeviceCapabilities(candidates, mode)
 }
 
 // SetExclusiveMode toggles Exclusive mode.
@@ -119,22 +119,22 @@ func (s *UIService) GetAsioStatus() (AsioStatus, error) {
 
 // SelectAsioDriver activates the requested ASIO driver.
 func (s *UIService) SelectAsioDriver(id string) error {
-	return s.ctrl.AsioService().SelectDriver(id)
+	return s.ctrl.SelectAsioDriver(id)
 }
 
 // SetAsioClockSource switches hardware clock source on the active ASIO driver.
 func (s *UIService) SetAsioClockSource(index int) error {
-	return s.ctrl.AsioService().SetClockSource(index)
+	return s.ctrl.SetAsioClockSource(index)
 }
 
 // SetAsioBufferSize configures the ASIO buffer size in sample frames.
 func (s *UIService) SetAsioBufferSize(frames int) error {
-	return s.ctrl.AsioService().SetBufferSize(frames)
+	return s.ctrl.SetAsioBufferSize(frames)
 }
 
 // ConfigureNativeDSD configures Native DSD mode with controller-level safety guard.
 func (s *UIService) ConfigureNativeDSD(format string) error {
-	return s.ctrl.AsioService().ConfigureNativeDSD(format)
+	return s.ctrl.EnableNativeDSD(format)
 }
 
 // ConfirmNativeDSDRisk satisfies the mandatory Native DSD safety guard.
@@ -142,7 +142,12 @@ func (s *UIService) ConfirmNativeDSDRisk(confirmation string) error {
 	return s.ctrl.AsioService().ConfirmNativeDSDRisk(confirmation)
 }
 
+// CancelNativeDSDEntry revokes a pending Native DSD entry confirmation.
+func (s *UIService) CancelNativeDSDEntry() error {
+	return s.ctrl.CancelNativeDSDEntry()
+}
+
 // DisableNativeDSD reverts ASIO output to standard PCM mode.
-func (s *UIService) DisableNativeDSD() {
-	s.ctrl.AsioService().DisableNativeDSD()
+func (s *UIService) DisableNativeDSD() error {
+	return s.ctrl.DisableNativeDSD()
 }

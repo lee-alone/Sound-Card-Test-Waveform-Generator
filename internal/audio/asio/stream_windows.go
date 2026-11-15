@@ -40,6 +40,13 @@ func NewStream(driver bridge.Driver, config audio.StreamConfig) (*Stream, error)
 	if err := driver.SetSampleRate(targetRate); err != nil {
 		return nil, fmt.Errorf("failed to set sample rate %d: %w", config.Format.SampleRate, err)
 	}
+	chInfo, err := driver.GetChannelInfo(0, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query ASIO output sample type: %w", err)
+	}
+	if !pcmFormatMatchesSampleType(config.Format.SampleFormat, chInfo.SampleType) {
+		return nil, fmt.Errorf("ASIO channel reports %s, incompatible with requested %s", chInfo.SampleType.String(), config.Format.SampleFormat.String())
+	}
 
 	// Negotiate buffer size
 	bInfo, err := driver.GetBufferSize()
@@ -48,7 +55,15 @@ func NewStream(driver bridge.Driver, config audio.StreamConfig) (*Stream, error)
 	}
 
 	bufFrames := bInfo.PreferredSize
-	if config.BufferDuration > 0 {
+	if config.BufferFrames > 0 {
+		if config.BufferFrames < bInfo.MinSize || (bInfo.MaxSize > 0 && config.BufferFrames > bInfo.MaxSize) {
+			return nil, fmt.Errorf("ASIO buffer size %d out of bounds [%d, %d]", config.BufferFrames, bInfo.MinSize, bInfo.MaxSize)
+		}
+		if !validASIOBufferSize(config.BufferFrames, bInfo) {
+			return nil, fmt.Errorf("ASIO buffer size %d violates granularity %d", config.BufferFrames, bInfo.Granularity)
+		}
+		bufFrames = config.BufferFrames
+	} else if config.BufferDuration > 0 {
 		requestedFrames := int(targetRate * config.BufferDuration.Seconds())
 		if requestedFrames >= bInfo.MinSize && requestedFrames <= bInfo.MaxSize {
 			bufFrames = requestedFrames
@@ -77,6 +92,34 @@ func NewStream(driver bridge.Driver, config audio.StreamConfig) (*Stream, error)
 		bufferSize:    bufFrames,
 		stagingBuffer: make([]byte, stagingLen),
 	}, nil
+}
+
+func pcmFormatMatchesSampleType(format audio.SampleFormat, sampleType bridge.SampleType) bool {
+	switch format {
+	case audio.SampleFormat16Int:
+		return sampleType == bridge.SampleTypeInt16LSB || sampleType == bridge.SampleTypeInt16MSB
+	case audio.SampleFormat24Packed:
+		return sampleType == bridge.SampleTypeInt24LSB || sampleType == bridge.SampleTypeInt24MSB
+	case audio.SampleFormat24In32:
+		return sampleType == bridge.SampleTypeInt32LSB || sampleType == bridge.SampleTypeInt32MSB
+	case audio.SampleFormat32Float:
+		return sampleType == bridge.SampleTypeFloat32LSB || sampleType == bridge.SampleTypeFloat32MSB
+	default:
+		return false
+	}
+}
+
+func validASIOBufferSize(frames int, info bridge.BufferSizeInfo) bool {
+	if info.Granularity == 0 {
+		return true
+	}
+	if info.Granularity == -1 {
+		return frames > 0 && frames&(frames-1) == 0
+	}
+	if info.Granularity > 0 {
+		return (frames-info.MinSize)%info.Granularity == 0
+	}
+	return true
 }
 
 func (s *Stream) Start() error {

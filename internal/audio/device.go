@@ -104,6 +104,7 @@ func (s *DeviceState) UnmarshalJSON(data []byte) error {
 type DeviceInfo struct {
 	ID        string      `json:"id"`
 	Name      string      `json:"name"`
+	Backend   BackendType `json:"backend"`
 	IsDefault bool        `json:"is_default"`
 	Flow      DeviceFlow  `json:"flow"`
 	State     DeviceState `json:"state"`

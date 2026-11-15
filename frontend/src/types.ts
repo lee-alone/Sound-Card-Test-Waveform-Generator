@@ -16,6 +16,7 @@ export type BitPerfectTier = 'Configured' | 'Eligible' | 'Verified' | 'Unknown'
 export interface DeviceInfo {
   id: string
   name: string
+  backend?: 'WASAPI' | 'ASIO' | 'Mock' | string
   is_default: boolean
   state: string
 }
@@ -143,17 +144,29 @@ export interface LatencyReport {
   repetitions: number
 }
 
+export interface NativeDSDCapability {
+  format: string
+  bit_rate_hz: number
+  supported: boolean
+  sample_type?: string
+  reason?: string
+}
+
 export interface AsioStatus {
   active_driver: string
   driver_version: string
   sample_type: string
+  operating_mode?: 'PCM' | 'Native DSD' | 'Unavailable' | string
   clock_sources: ClockSource[]
   active_clock_index: number
   buffer_sizes: BufferSizeInfo
   active_buffer_size: number
   latency_report?: LatencyReport
   native_dsd_mode: boolean
+  native_dsd_active?: boolean
   native_dsd_confirmed: boolean
   selected_dsd_format: string
+  native_dsd_buffer_frames?: number
+  native_dsd_capabilities?: NativeDSDCapability[]
 }
 

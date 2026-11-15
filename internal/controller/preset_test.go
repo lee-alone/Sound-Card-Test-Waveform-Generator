@@ -60,7 +60,7 @@ func TestPreset_CorruptFile(t *testing.T) {
 func TestPreset_ApplySafely_MaintainsMutedState(t *testing.T) {
 	mockDev := &MockControllerDevice{stream: &MockControllerStream{bufferSize: 1920}}
 	mockBackend := &MockBackend{device: mockDev}
-	ctrl := NewAppController(mockBackend)
+	ctrl := newTestAppController(mockBackend)
 	if err := ctrl.Initialize(); err != nil {
 		t.Fatalf("ctrl init failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestPreset_ApplySafely_MaintainsMutedState(t *testing.T) {
 func TestPreset_ApplyWhilePlaying_TransitionsToSafe(t *testing.T) {
 	mockDev := &MockControllerDevice{stream: &MockControllerStream{bufferSize: 1920}}
 	mockBackend := &MockBackend{device: mockDev}
-	ctrl := NewAppController(mockBackend)
+	ctrl := newTestAppController(mockBackend)
 	_ = ctrl.Initialize()
 	defer ctrl.Close()
 	_ = ctrl.SelectDevice("mock-dev-1")

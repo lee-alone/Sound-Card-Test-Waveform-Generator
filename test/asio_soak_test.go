@@ -71,7 +71,7 @@ func TestAsio8HourFullStackSoak(t *testing.T) {
 	streamFmt := audio.AudioFormat{
 		SampleRate:   48000,
 		Channels:     2,
-		SampleFormat: audio.SampleFormat32Float,
+		SampleFormat: audio.SampleFormat24In32,
 	}
 
 	engCfg := engine.EngineConfig{

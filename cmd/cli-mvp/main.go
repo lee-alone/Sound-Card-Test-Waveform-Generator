@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"sound-signal-generator/internal/audio"
+	"sound-signal-generator/internal/audio/asio"
 	"sound-signal-generator/internal/audio/wasapi"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/dsd"
@@ -38,7 +39,7 @@ func main() {
 	defer runtime.UnlockOSThread()
 
 	backend := wasapi.NewBackend()
-	ctrl := controller.NewAppController(backend)
+	ctrl := controller.NewAppControllerWithAsioBackend(backend, asio.NewBackend())
 	if err := ctrl.Initialize(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing audio backend: %v\n", err)
 		os.Exit(1)
@@ -89,18 +90,7 @@ func main() {
 	// 3. Probe capabilities
 	if *probeFlag {
 		candidates := audio.GenerateStandardCandidateMatrix(2)
-		dev, err := backend.GetDevice(targetDeviceID)
-		if targetDeviceID == "" {
-			dev, err = backend.GetDefaultDevice()
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to get device: %v\n", err)
-			os.Exit(1)
-		}
-		defer dev.Close()
-
-		fmt.Printf("Probing capabilities for: %s\n", dev.Name())
-		results, err := dev.ProbeCapabilities(candidates, audio.ShareModeExclusive)
+		results, err := ctrl.ProbeSelectedDeviceCapabilities(candidates, audio.ShareModeExclusive)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Probe failed: %v\n", err)
 			os.Exit(1)

@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"os"
 	"runtime"
 	"testing"
 	"time"
@@ -34,6 +35,37 @@ func TestEnumerateInstalledDrivers(t *testing.T) {
 	}
 	if !foundCombo384 && len(drivers) > 0 {
 		t.Log("Note: Combo384 driver not found directly, but registry enumeration succeeded.")
+	}
+}
+
+func TestLiveASIOCOMCreation(t *testing.T) {
+	if os.Getenv("ASIO_LIVE_TEST") != "1" {
+		t.Skip("set ASIO_LIVE_TEST=1 to exercise installed ASIO drivers")
+	}
+
+	drivers, err := EnumerateInstalledDrivers()
+	if err != nil {
+		t.Fatalf("enumerate failed: %v", err)
+	}
+	if len(drivers) == 0 {
+		t.Skip("no installed ASIO drivers")
+	}
+
+	for _, desc := range drivers {
+		driver, err := NewCGODriver(desc.CLSID)
+		if err != nil {
+			t.Errorf("%s: %v", desc.Description, err)
+			continue
+		}
+		t.Logf("%s: COM object created for %s", desc.Description, desc.CLSID)
+		if err := driver.Init(0); err != nil {
+			t.Logf("%s: ASIOInit failed: %v", desc.Description, err)
+		} else {
+			t.Logf("%s: ASIOInit succeeded", desc.Description)
+		}
+		if err := driver.Close(); err != nil {
+			t.Errorf("%s: close failed: %v", desc.Description, err)
+		}
 	}
 }
 

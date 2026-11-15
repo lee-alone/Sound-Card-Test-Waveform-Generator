@@ -16,14 +16,14 @@ import (
 
 // DriverCompatibilityRecord records the verification outcome for a specific driver and format.
 type DriverCompatibilityRecord struct {
-	DriverName       string            `json:"driver_name"`
-	DriverVersion    string            `json:"driver_version"`
-	TestedFormat     string            `json:"tested_format"`
-	FormatType       string            `json:"format_type"` // PCM or Native DSD
-	SampleRate       float64           `json:"sample_rate"`
-	Supported        bool              `json:"supported"`
-	SampleTypeString string            `json:"sample_type_string"`
-	Note             string            `json:"note"`
+	DriverName       string  `json:"driver_name"`
+	DriverVersion    string  `json:"driver_version"`
+	TestedFormat     string  `json:"tested_format"`
+	FormatType       string  `json:"format_type"` // PCM or Native DSD
+	SampleRate       float64 `json:"sample_rate"`
+	Supported        bool    `json:"supported"`
+	SampleTypeString string  `json:"sample_type_string"`
+	Note             string  `json:"note"`
 }
 
 // MultiVendorCompatibilityMatrix aggregates compatibility across all tested vendors.
@@ -85,7 +85,7 @@ func TestMultiVendorDriverCompatibilityMatrix(t *testing.T) {
 					Format: audio.AudioFormat{
 						SampleRate:   int(rate),
 						Channels:     2,
-						SampleFormat: audio.SampleFormat32Float,
+						SampleFormat: asioPCMFormatForType(profile.DefaultPCMType),
 					},
 					ShareMode: audio.ShareModeExclusive,
 				}
@@ -200,7 +200,7 @@ func TestRapidDriverSwitchingAndResetNoDeadlock(t *testing.T) {
 				Format: audio.AudioFormat{
 					SampleRate:   48000,
 					Channels:     2,
-					SampleFormat: audio.SampleFormat32Float,
+					SampleFormat: asioPCMFormatForType(p.DefaultPCMType),
 				},
 				ShareMode: audio.ShareModeExclusive,
 			}
@@ -221,4 +221,19 @@ func TestRapidDriverSwitchingAndResetNoDeadlock(t *testing.T) {
 	}
 
 	t.Log("Rapid driver switching completed 40 transitions with 0 deadlocks or crashes.")
+}
+
+func asioPCMFormatForType(sampleType bridge.SampleType) audio.SampleFormat {
+	switch sampleType {
+	case bridge.SampleTypeInt16LSB, bridge.SampleTypeInt16MSB:
+		return audio.SampleFormat16Int
+	case bridge.SampleTypeInt24LSB, bridge.SampleTypeInt24MSB:
+		return audio.SampleFormat24Packed
+	case bridge.SampleTypeInt32LSB, bridge.SampleTypeInt32MSB:
+		return audio.SampleFormat24In32
+	case bridge.SampleTypeFloat32LSB, bridge.SampleTypeFloat32MSB:
+		return audio.SampleFormat32Float
+	default:
+		return audio.SampleFormat24In32
+	}
 }

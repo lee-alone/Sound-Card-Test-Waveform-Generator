@@ -72,7 +72,7 @@ export function createMockDiagnostics(deviceName: string): DiagnosticsReport {
 export const defaultMockAsioStatus: AsioStatus = {
   active_driver: 'ASIO Combo384 Driver',
   driver_version: '0x0103',
-  sample_type: 'ASIOSTDSDInt8LSB1',
+  sample_type: 'ASIOSTInt32LSB',
   clock_sources: [
     { index: 0, name: 'Internal Master Clock', is_current_source: true },
     { index: 1, name: 'S/PDIF Word Clock', is_current_source: false }
@@ -96,7 +96,9 @@ export const defaultMockAsioStatus: AsioStatus = {
     jitter_standard_deviation: 0.0872,
     repetitions: 100
   },
+  operating_mode: 'PCM',
   native_dsd_mode: false,
+  native_dsd_active: false,
   native_dsd_confirmed: false,
-  selected_dsd_format: 'DSD256 (11.2896MHz)'
+  selected_dsd_format: ''
 }

@@ -1,13 +1,75 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import DeviceSelector from '../components/DeviceSelector.vue'
 import GeneratorPanel from '../components/GeneratorPanel.vue'
 import DiagnosticsView from '../components/DiagnosticsView.vue'
 import SafetyModal from '../components/SafetyModal.vue'
 import AsioPanel from '../components/AsioPanel.vue'
-import type { DiagnosticsReport, ExtendedSignalRequest, SafetyAssessment } from '../types'
+import { api } from '../api'
+import type { AsioStatus, DiagnosticsReport, ExtendedSignalRequest, SafetyAssessment } from '../types'
+
+function createPCMAsioStatus(): AsioStatus {
+  return {
+    active_driver: 'ASIO Combo384 Driver',
+    driver_version: '0x0103',
+    sample_type: 'ASIOSTInt32LSB',
+    operating_mode: 'PCM',
+    clock_sources: [
+      { index: 0, name: 'Internal Master Clock', is_current_source: true },
+      { index: 1, name: 'S/PDIF Word Clock', is_current_source: false }
+    ],
+    active_clock_index: 0,
+    buffer_sizes: {
+      min_size: 64,
+      max_size: 4096,
+      preferred_size: 512,
+      granularity: -1
+    },
+    active_buffer_size: 512,
+    native_dsd_mode: false,
+    native_dsd_active: false,
+    native_dsd_confirmed: false,
+    selected_dsd_format: '',
+    native_dsd_capabilities: []
+  }
+}
+
+function installAsioApiMock() {
+  let current = createPCMAsioStatus()
+  vi.spyOn(api, 'getAsioStatus').mockImplementation(async () => ({
+    ...current,
+    clock_sources: current.clock_sources.map(source => ({ ...source })),
+    buffer_sizes: { ...current.buffer_sizes },
+    native_dsd_capabilities: current.native_dsd_capabilities?.map(cap => ({ ...cap }))
+  }))
+  vi.spyOn(api, 'selectAsioDriver').mockResolvedValue()
+  vi.spyOn(api, 'setAsioClockSource').mockResolvedValue()
+  vi.spyOn(api, 'setAsioBufferSize').mockResolvedValue()
+  vi.spyOn(api, 'confirmNativeDSDRisk').mockResolvedValue()
+  vi.spyOn(api, 'cancelNativeDSDEntry').mockResolvedValue()
+  const configure = vi.spyOn(api, 'configureNativeDSD').mockImplementation(async format => {
+    current = {
+      ...current,
+      sample_type: 'ASIOSTDSDInt8LSB1',
+      operating_mode: 'Native DSD',
+      native_dsd_mode: true,
+      native_dsd_active: true,
+      native_dsd_confirmed: true,
+      selected_dsd_format: format,
+      native_dsd_buffer_frames: 256
+    }
+  })
+  vi.spyOn(api, 'disableNativeDSD').mockImplementation(async () => {
+    current = createPCMAsioStatus()
+  })
+  return { configure, getCurrent: () => current }
+}
 
 describe('Frontend Component Unit Tests', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   const dummyDiagnostics: DiagnosticsReport = {
     state: 'Running',
     device_name: 'Realtek High Definition Audio',
@@ -117,19 +179,57 @@ describe('Frontend Component Unit Tests', () => {
     expect(wrapper.emitted('confirm')![0]).toEqual(['dop_carrier'])
   })
 
-  it('AsioPanel renders controls and blocks unconfirmed Native DSD with safety modal', async () => {
+  it('AsioPanel starts in PCM and hides Native DSD test controls', async () => {
+    installAsioApiMock()
     const wrapper = mount(AsioPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
-    expect(wrapper.text()).toContain('ASIO 驱动与 Native DSD 原生直通控制面板')
-    expect(wrapper.text()).toContain('ASIOGetLatencies 报告与回环脉冲实测')
+    expect(wrapper.text()).toContain('ASIO 驱动控制面板')
+    expect(wrapper.text()).toContain('当前输出：PCM')
+    expect(wrapper.text()).toContain('进入 Native DSD 测试模式…')
+    expect(wrapper.text()).not.toContain('关闭 Native DSD · 恢复 PCM')
+    expect(wrapper.text()).not.toContain('Native DSD 驱动能力检测')
 
-    // Click "启用 Native DSD 直通"
-    const enableBtn = wrapper.findAll('button').find(b => b.text().includes('启用 Native DSD 直通'))
-    expect(enableBtn).toBeDefined()
-    await enableBtn!.trigger('click')
-
-    // Safety Warning Modal should be visible
-    expect(wrapper.text()).toContain('不可跳过的 Native DSD 高危操作安全确认')
+    const options = wrapper.findAll('option').map(option => option.text()).join(' ')
+    expect(options).not.toContain('DSD256 (11.2896 MHz)')
+    expect(options).not.toContain('DSD512 (22.5792 MHz 驱动可选)')
   })
+
+  it('AsioPanel requires explicit DSD entry and returns to PCM on exit', async () => {
+    const mocked = installAsioApiMock()
+    const wrapper = mount(AsioPanel)
+    await flushPromises()
+
+    const entryButton = wrapper.findAll('button').find(button => button.text().includes('进入 Native DSD 测试模式'))
+    expect(entryButton).toBeDefined()
+    await entryButton!.trigger('click')
+
+    expect(wrapper.text()).toContain('不可跳过的 Native DSD 高危操作安全确认')
+    const formatOptions = wrapper.findAll('option').map(option => option.text()).join(' ')
+    expect(formatOptions).toContain('DSD256')
+
+    const confirmation = wrapper.find('input[type="text"]')
+    await confirmation.setValue('YES')
+    const confirmButton = wrapper.findAll('button').find(button => button.text().includes('确认并解锁 Native DSD'))
+    expect(confirmButton).toBeDefined()
+    await confirmButton!.trigger('click')
+    await flushPromises()
+
+    expect(mocked.configure).toHaveBeenCalledWith('DSD256')
+    expect(mocked.getCurrent().native_dsd_mode).toBe(true)
+    expect(wrapper.text()).toContain('Native DSD 测试模式')
+    expect(wrapper.text()).toContain('关闭 Native DSD · 恢复 PCM')
+
+    const exitButton = wrapper.findAll('button').find(button => button.text().includes('关闭 Native DSD'))
+    expect(exitButton).toBeDefined()
+    await exitButton!.trigger('click')
+    await flushPromises()
+
+    expect(mocked.getCurrent().native_dsd_mode).toBe(false)
+    expect(mocked.getCurrent().operating_mode).toBe('PCM')
+    expect(wrapper.text()).toContain('当前输出：PCM')
+    expect(wrapper.text()).toContain('进入 Native DSD 测试模式…')
+    expect(wrapper.text()).not.toContain('关闭 Native DSD · 恢复 PCM')
+  })
+
 })

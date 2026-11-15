@@ -17,6 +17,7 @@ typedef struct AsioBridgeState {
 } AsioBridgeState;
 
 static AsioBridgeState* s_active_bridge = NULL;
+static HRESULT s_last_create_hresult = S_OK;
 
 // C static callbacks invoked by ASIO driver's real-time OS thread
 static void asio_buffer_switch_callback(long doubleBufferIndex, ASIOBool directProcess) {
@@ -47,22 +48,28 @@ static void* asio_buffer_switch_time_info(void* params, long doubleBufferIndex, 
 }
 
 AsioBridgeHandle asio_bridge_create(const char* clsid_str) {
+    s_last_create_hresult = S_OK;
     if (!clsid_str || strlen(clsid_str) == 0) {
+        s_last_create_hresult = E_INVALIDARG;
         return NULL;
     }
 
     AsioBridgeState* state = (AsioBridgeState*)calloc(1, sizeof(AsioBridgeState));
     if (!state) {
+        s_last_create_hresult = E_OUTOFMEMORY;
         return NULL;
     }
 
-    // Initialize COM on this thread
-    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    // ASIO drivers are commonly registered with ThreadingModel=Apartment.
+    // Creating them from an MTA can fail with E_NOINTERFACE even when the
+    // CLSID and DLL are valid, so match the registered apartment model.
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(hr)) {
         state->comInitialized = 1;
     } else if (hr == RPC_E_CHANGED_MODE) {
         state->comInitialized = 0; // Already initialized in another mode, still usable
     } else {
+        s_last_create_hresult = hr;
         free(state);
         return NULL;
     }
@@ -74,6 +81,7 @@ AsioBridgeHandle asio_bridge_create(const char* clsid_str) {
     CLSID clsid;
     hr = CLSIDFromString(wClsid, &clsid);
     if (FAILED(hr)) {
+        s_last_create_hresult = hr;
         if (state->comInitialized) CoUninitialize();
         free(state);
         return NULL;
@@ -83,6 +91,7 @@ AsioBridgeHandle asio_bridge_create(const char* clsid_str) {
     IASIO* driver = NULL;
     hr = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER, &clsid, (void**)&driver);
     if (FAILED(hr) || !driver) {
+        s_last_create_hresult = FAILED(hr) ? hr : E_POINTER;
         if (state->comInitialized) CoUninitialize();
         free(state);
         return NULL;
@@ -99,7 +108,12 @@ AsioBridgeHandle asio_bridge_create(const char* clsid_str) {
     state->callbacks.bufferSwitchTimeInfo = asio_buffer_switch_time_info;
 
     s_active_bridge = state;
+    s_last_create_hresult = S_OK;
     return (AsioBridgeHandle)state;
+}
+
+HRESULT asio_bridge_get_last_create_hresult(void) {
+    return s_last_create_hresult;
 }
 
 void asio_bridge_destroy(AsioBridgeHandle handle) {

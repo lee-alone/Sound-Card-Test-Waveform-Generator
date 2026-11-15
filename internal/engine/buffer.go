@@ -40,6 +40,33 @@ func NewBufferPool(numFrames int, numChannels int, bytesPerSample int) *BufferPo
 	}
 }
 
+// NewBufferPoolWithRawBytes allocates a buffer pool with an explicit output
+// byte count. This supports packed formats such as Native DSD where one byte
+// carries eight 1-bit sample frames.
+func NewBufferPoolWithRawBytes(numFrames int, numChannels int, rawBytes int) *BufferPool {
+	if numFrames <= 0 {
+		numFrames = 1024
+	}
+	if numChannels <= 0 {
+		numChannels = 2
+	}
+	if rawBytes < 0 {
+		rawBytes = 0
+	}
+
+	channels := make([][]float64, numChannels)
+	for ch := 0; ch < numChannels; ch++ {
+		channels[ch] = make([]float64, numFrames)
+	}
+	return &BufferPool{
+		Channels:      channels,
+		RawBytes:      make([]byte, rawBytes),
+		NumFrames:     numFrames,
+		NumChannels:   numChannels,
+		BytesPerFrame: rawBytes / numChannels,
+	}
+}
+
 // Zero fills all channel buffers and raw byte buffers with zeros.
 func (bp *BufferPool) Zero() {
 	for ch := 0; ch < bp.NumChannels; ch++ {

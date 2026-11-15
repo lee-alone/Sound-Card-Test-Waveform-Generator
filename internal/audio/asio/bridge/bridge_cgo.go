@@ -31,7 +31,8 @@ func NewCGODriver(clsid string) (*CGODriver, error) {
 
 	h := C.asio_bridge_create(cClsid)
 	if h == nil {
-		return nil, fmt.Errorf("failed to load ASIO COM server for CLSID: %s", clsid)
+		hr := uint32(C.asio_bridge_get_last_create_hresult())
+		return nil, fmt.Errorf("failed to load ASIO COM server for CLSID %s (HRESULT 0x%08X%s)", clsid, hr, asioCreateHint(hr))
 	}
 
 	return &CGODriver{handle: h}, nil
@@ -298,4 +299,21 @@ func (d *CGODriver) Close() error {
 		d.handle = nil
 	}
 	return nil
+}
+
+func asioCreateHint(hr uint32) string {
+	switch hr {
+	case 0x80040154:
+		return ": class not registered for this process architecture"
+	case 0x80004002:
+		return ": COM apartment/interface mismatch (ASIO drivers normally require STA)"
+	case 0x8007007E:
+		return ": ASIO driver DLL or one of its dependencies could not be loaded"
+	case 0x80070005:
+		return ": access denied while loading the ASIO driver"
+	case 0x800401F0:
+		return ": COM was not initialized"
+	default:
+		return ""
+	}
 }

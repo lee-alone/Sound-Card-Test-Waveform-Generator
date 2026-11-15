@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"sound-signal-generator/internal/audio"
+	"sound-signal-generator/internal/audio/asio"
+	"sound-signal-generator/internal/audio/asio/bridge"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/format"
 )
@@ -75,9 +77,9 @@ type MockPhase4Backend struct {
 	dev *MockPhase4Device
 }
 
-func (b *MockPhase4Backend) Type() audio.BackendType              { return audio.BackendMock }
-func (b *MockPhase4Backend) Initialize() error                    { return nil }
-func (b *MockPhase4Backend) Close() error                         { return nil }
+func (b *MockPhase4Backend) Type() audio.BackendType { return audio.BackendMock }
+func (b *MockPhase4Backend) Initialize() error       { return nil }
+func (b *MockPhase4Backend) Close() error            { return nil }
 func (b *MockPhase4Backend) EnumerateDevices() ([]audio.DeviceInfo, error) {
 	return []audio.DeviceInfo{
 		{ID: b.dev.ID(), Name: b.dev.Name(), IsDefault: true, State: audio.StateActive},
@@ -108,7 +110,7 @@ func TestPhase4_P999_BenchmarkMatrix(t *testing.T) {
 		{name: "192kHz_1920frames_Multitone", sampleRate: 192000, frames: 1920, waveform: controller.WaveformMultitoneCCIF},
 	}
 
-	const bufferPeriodNs = 10_000_000.0 // 10ms = 10,000,000 ns
+	const bufferPeriodNs = 10_000_000.0       // 10ms = 10,000,000 ns
 	const p999LimitNs = 0.30 * bufferPeriodNs // 3,000,000 ns (3ms)
 	const maxLimitNs = 0.70 * bufferPeriodNs  // 7,000,000 ns (7ms)
 
@@ -121,7 +123,7 @@ func TestPhase4_P999_BenchmarkMatrix(t *testing.T) {
 				bufferSize: uint32(tc.frames * 4),
 			}
 			backend := &MockPhase4Backend{dev: dev}
-			ctrl := controller.NewAppController(backend)
+			ctrl := controller.NewAppControllerWithAsioBackend(backend, asio.NewMockBackend(bridge.ProfileThesycon))
 			_ = ctrl.Initialize()
 			defer ctrl.Close()
 			_ = ctrl.SelectDevice(dev.ID())

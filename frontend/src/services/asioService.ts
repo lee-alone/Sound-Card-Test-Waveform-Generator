@@ -53,6 +53,13 @@ export const asioService = {
     return Promise.resolve()
   },
 
+  async cancelNativeDSDEntry(): Promise<void> {
+    if (isWailsRuntime()) {
+      return callBackend<void>('CancelNativeDSDEntry')
+    }
+    return Promise.resolve()
+  },
+
   async disableNativeDSD(): Promise<void> {
     if (isWailsRuntime()) {
       return callBackend<void>('DisableNativeDSD')

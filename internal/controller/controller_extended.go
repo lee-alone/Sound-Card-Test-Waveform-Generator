@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"sound-signal-generator/internal/audio"
+	"sound-signal-generator/internal/audio/asio"
 	"sound-signal-generator/internal/engine"
 )
 
@@ -20,28 +21,29 @@ func (c *AppController) ConfigureExtendedSignal(req ExtendedSignalRequest) error
 	}
 
 	if c.selectedDevice == nil {
-		var dev audio.Device
-		var err error
-		if req.DeviceID != "" {
-			dev, err = c.backend.GetDevice(req.DeviceID)
-		}
-		if dev == nil {
-			dev, err = c.backend.GetDefaultDevice()
-		}
-		if err != nil || dev == nil {
+		if err := c.selectDeviceLocked(req.DeviceID); err != nil {
 			return ErrDeviceNotSelected
 		}
-		c.selectedDevice = dev
-	} else if req.DeviceID != "" && c.selectedDevice.ID() != req.DeviceID {
-		dev, err := c.backend.GetDevice(req.DeviceID)
-		if err == nil && dev != nil {
-			_ = c.selectedDevice.Close()
-			c.selectedDevice = dev
+	} else if req.DeviceID != "" && req.DeviceID != c.selectedDeviceKey && req.DeviceID != c.selectedDevice.ID() {
+		if err := c.selectDeviceLocked(req.DeviceID); err != nil {
+			return err
+		}
+	}
+
+	// Leaving Native DSD always closes the direct 1-bit stream and restores the
+	// prior PCM clock before any PCM/DoP stream is opened.
+	if c.nativeDSDActive || c.nativeDSDFormat != 0 || c.asioService.NativeDSDMode() {
+		if c.engine.State() != engine.StateClosed {
+			_ = c.engine.Close()
+		}
+		if err := c.deactivateNativeDSDLocked(); err != nil {
+			return fmt.Errorf("failed to restore PCM mode: %w", err)
 		}
 	}
 
 	// 2. Handle DoP signal path
 	if req.Waveform == WaveformDoP {
+		req = normalizeDoPRequest(req)
 		c.mu.Unlock()
 		dopReq := DoPRequest{
 			DeviceID:     req.DeviceID,
@@ -95,6 +97,9 @@ func (c *AppController) ConfigureExtendedSignal(req ExtendedSignalRequest) error
 		BufferDuration: c.bufferDuration,
 		FadeDurationMs: 10.0,
 	}
+	if _, ok := c.selectedDevice.(*asio.Device); ok {
+		engCfg.BufferFrames = c.asioService.BufferSize()
+	}
 
 	if err := c.engine.Open(engCfg); err != nil {
 		return fmt.Errorf("engine open failed: %w", err)
@@ -104,6 +109,8 @@ func (c *AppController) ConfigureExtendedSignal(req ExtendedSignalRequest) error
 		return fmt.Errorf("engine prime failed: %w", err)
 	}
 
+	normalizedPCM := req
+	c.lastPCMRequest = &normalizedPCM
 	c.extendedRequest = req
 	c.currentRequest = SignalRequest{
 		DeviceID:     req.DeviceID,
@@ -125,11 +132,19 @@ func (c *AppController) Get10HzDiagnostics() DiagnosticsReport {
 
 	status := c.statusLocked()
 	isDoP := (c.extendedRequest.Waveform == WaveformDoP)
+	isDirectDSD := isDoP || c.nativeDSDActive
 
 	reqFormat := audio.AudioFormat{
 		SampleRate:   c.extendedRequest.SampleRate,
 		Channels:     c.extendedRequest.Channels,
 		SampleFormat: c.extendedRequest.SampleFormat,
+	}
+	leftVolume := c.extendedRequest.LeftVolumeDBFS
+	rightVolume := c.extendedRequest.RightVolumeDBFS
+	if c.nativeDSDActive {
+		reqFormat = status.ActiveFormat
+		leftVolume = 0
+		rightVolume = 0
 	}
 	actualFormat := status.ActiveFormat
 
@@ -138,9 +153,9 @@ func (c *AppController) Get10HzDiagnostics() DiagnosticsReport {
 		c.isExclusive,
 		reqFormat,
 		actualFormat,
-		c.extendedRequest.LeftVolumeDBFS,
-		c.extendedRequest.RightVolumeDBFS,
-		isDoP,
+		leftVolume,
+		rightVolume,
+		isDirectDSD,
 	)
 
 	return c.diagnosticsService.BuildReport(status, bitTier, c.bufferDuration, c.isExclusive)
@@ -154,8 +169,8 @@ func (c *AppController) statusLocked() ControllerStatus {
 	}
 
 	return ControllerStatus{
-		State:        c.engine.State(),
-		DeviceName:   devName,
+		State:      c.engine.State(),
+		DeviceName: devName,
 		ActiveFormat: audio.AudioFormat{
 			SampleRate:   c.currentRequest.SampleRate,
 			Channels:     c.currentRequest.Channels,

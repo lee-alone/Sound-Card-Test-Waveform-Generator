@@ -6,17 +6,40 @@ bin/
 *.so
 *.dylib
 
-# Test artifacts and coverage
+# Go build and test artifacts
+.gocache/
+.cache/
 *.test
 *.out
+*.prof
 coverage.txt
+coverage.html
+coverage/
 
-# Node / Frontend dependencies & local build outputs
+# Node / Frontend dependencies and local build outputs
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+frontend/.cache/
+frontend/.turbo/
+frontend/coverage/
+frontend/.eslintcache
+frontend/*.tsbuildinfo
+node_modules/
+/dist/
+.turbo/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
 
 # IDE & OS files
 .idea/
@@ -26,3 +49,4 @@ yarn-error.log*
 *~
 .DS_Store
 Thumbs.db
+Desktop.ini

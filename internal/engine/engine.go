@@ -24,9 +24,12 @@ var (
 // EngineConfig holds configuration parameters for initializing AudioEngine.
 type EngineConfig struct {
 	Device         audio.Device
+	ExternalStream audio.AudioStream
 	Format         audio.AudioFormat
 	ShareMode      audio.ShareMode
 	BufferDuration time.Duration
+	BufferFrames   int
+	RawBufferBytes int
 	FadeDurationMs float64
 	AllowClipping  bool
 }
@@ -46,10 +49,10 @@ type AudioEngine struct {
 	peakGuard    *format.PeakGuard
 
 	// Control channels
-	stopSignal   atomic.Bool
-	stopDone     chan struct{}
+	stopSignal    atomic.Bool
+	stopDone      chan struct{}
 	faultInjected atomic.Pointer[error]
-	invalidated  atomic.Bool
+	invalidated   atomic.Bool
 
 	activeGoroutine atomic.Bool
 }
@@ -95,8 +98,8 @@ func (e *AudioEngine) Open(cfg EngineConfig) error {
 		return ErrEngineAlreadyOpen
 	}
 
-	if cfg.Device == nil {
-		return errors.New("device cannot be nil")
+	if cfg.Device == nil && cfg.ExternalStream == nil {
+		return errors.New("device or external stream cannot be nil")
 	}
 
 	// 1. Transition Closed -> Probing
@@ -108,26 +111,44 @@ func (e *AudioEngine) Open(cfg EngineConfig) error {
 	// 2. Open Stream
 	streamCfg := audio.StreamConfig{
 		Format:         cfg.Format,
+		BufferFrames:   cfg.BufferFrames,
 		ShareMode:      cfg.ShareMode,
 		BufferDuration: cfg.BufferDuration,
 		EventDriven:    true,
 	}
 
-	stream, err := cfg.Device.OpenStream(streamCfg)
-	if err != nil {
-		e.stateMachine.Transition(EventProbeFailed)
-		e.diagnostics.SetCurrentState(StateFaulted)
-		return fmt.Errorf("device OpenStream failed: %w", err)
+	stream := cfg.ExternalStream
+	if stream == nil {
+		var err error
+		stream, err = cfg.Device.OpenStream(streamCfg)
+		if err != nil {
+			e.stateMachine.Transition(EventProbeFailed)
+			e.diagnostics.SetCurrentState(StateFaulted)
+			return fmt.Errorf("device OpenStream failed: %w", err)
+		}
 	}
 
 	bufferFrames, err := stream.GetBufferSize()
 	if err != nil || bufferFrames == 0 {
+		if cfg.ExternalStream != nil {
+			_ = stream.Close()
+			e.stateMachine.Transition(EventProbeFailed)
+			e.diagnostics.SetCurrentState(StateFaulted)
+			if err != nil {
+				return fmt.Errorf("external stream reported invalid buffer size %d: %w", bufferFrames, err)
+			}
+			return fmt.Errorf("external stream reported invalid buffer size: %d", bufferFrames)
+		}
 		bufferFrames = uint32(float64(cfg.Format.SampleRate) * 0.01) // 10ms fallback
 	}
 
 	// 3. Pre-allocate BufferPool
-	bytesPerSample := cfg.Format.SampleFormat.BytesPerSample()
-	e.bufferPool = NewBufferPool(int(bufferFrames), cfg.Format.Channels, bytesPerSample)
+	if cfg.RawBufferBytes > 0 {
+		e.bufferPool = NewBufferPoolWithRawBytes(int(bufferFrames), cfg.Format.Channels, cfg.RawBufferBytes)
+	} else {
+		bytesPerSample := cfg.Format.SampleFormat.BytesPerSample()
+		e.bufferPool = NewBufferPool(int(bufferFrames), cfg.Format.Channels, bytesPerSample)
+	}
 
 	e.cfg = cfg
 	e.device = cfg.Device
@@ -242,7 +263,20 @@ func (e *AudioEngine) Start() error {
 			for i := range dst {
 				dst[i] = 0
 			}
-			_ = e.stream.ReleaseBuffer(numFrames, 0)
+			// Raw 1-bit paths need an explicit idle pattern. PCM keeps the
+			// legacy zero-filled release path because some exclusive WASAPI
+			// endpoints reject the silent flag during pre-roll.
+			silentFlags := uint32(0)
+			if e.rawProvider != nil {
+				silentFlags = 0x01
+			}
+			if err := e.stream.ReleaseBuffer(numFrames, silentFlags); err != nil && e.rawProvider != nil {
+				e.fader.Mute()
+				e.stateMachine.ForceState(StateFaulted)
+				e.diagnostics.SetCurrentState(StateFaulted)
+				_ = e.stream.Stop()
+				return fmt.Errorf("initial silent buffer release failed: %w", err)
+			}
 		}
 	}
 
@@ -313,6 +347,7 @@ func (e *AudioEngine) Stop() error {
 // Close gracefully closes the audio stream and resets to StateClosed.
 func (e *AudioEngine) Close() error {
 	_ = e.Stop()
+	e.waitForRenderLoop()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -329,6 +364,22 @@ func (e *AudioEngine) Close() error {
 	}
 	e.diagnostics.SetCurrentState(StateClosed)
 	return nil
+}
+
+// waitForRenderLoop ensures the streaming goroutine has fully exited before the
+// engine releases or clears the active stream.
+func (e *AudioEngine) waitForRenderLoop() {
+	e.mu.Lock()
+	done := e.stopDone
+	active := e.activeGoroutine.Load()
+	e.mu.Unlock()
+	if !active || done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+	}
 }
 
 // InjectFault injects a simulated error into the real-time path for verification.
@@ -388,6 +439,7 @@ func (e *AudioEngine) renderLoop() {
 			e.diagnostics.SetLastErrorCode(0xDEADBEEF)
 			e.stateMachine.ForceState(StateFaulted)
 			e.diagnostics.SetCurrentState(StateFaulted)
+			_ = e.stream.Stop()
 			return
 		}
 
@@ -402,6 +454,7 @@ func (e *AudioEngine) renderLoop() {
 				e.diagnostics.SetLastErrorCode(0xE0000002)
 				e.stateMachine.ForceState(StateFaulted)
 				e.diagnostics.SetCurrentState(StateFaulted)
+				_ = e.stream.Stop()
 				return
 			}
 		} else {
@@ -425,6 +478,7 @@ func (e *AudioEngine) renderLoop() {
 				e.diagnostics.SetLastErrorCode(0xE0000001)
 				e.stateMachine.ForceState(StateFaulted)
 				e.diagnostics.SetCurrentState(StateFaulted)
+				_ = e.stream.Stop()
 				return
 			}
 		}
@@ -445,7 +499,14 @@ func (e *AudioEngine) renderLoop() {
 			// Copy pre-rendered bytes to driver buffer without allocation
 			dstSlice := unsafe.Slice((*byte)(unsafe.Pointer(pBuf)), len(rawBytes))
 			copy(dstSlice, rawBytes)
-			_ = e.stream.ReleaseBuffer(numFrames, 0)
+			if err := e.stream.ReleaseBuffer(numFrames, 0); err != nil {
+				e.fader.Mute()
+				e.diagnostics.SetLastErrorCode(0xE0000003)
+				e.stateMachine.ForceState(StateFaulted)
+				e.diagnostics.SetCurrentState(StateFaulted)
+				_ = e.stream.Stop()
+				return
+			}
 		}
 
 		renderDuration := time.Since(startTime).Nanoseconds()

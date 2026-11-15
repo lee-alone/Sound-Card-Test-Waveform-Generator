@@ -47,10 +47,13 @@ func (b *Backend) Type() audio.BackendType {
 	return audio.BackendWASAPI
 }
 
-// Initialize initializes COM for the calling thread if needed.
+// Initialize initializes COM for the calling thread if needed. WASAPI and
+// common ASIO drivers share the hosting thread, so use STA consistently.
+// Initializing this thread as MTA first makes later Apartment-threaded ASIO
+// driver creation fail with E_NOINTERFACE.
 func (b *Backend) Initialize() error {
 	runtime.LockOSThread()
-	err := CoInitializeExWrapper(COINIT_MULTITHREADED)
+	err := CoInitializeExWrapper(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)
 	if err != nil {
 		runtime.UnlockOSThread()
 		return err
@@ -182,6 +185,7 @@ func (b *Backend) GetDefaultDevice() (audio.Device, error) {
 
 func getDeviceInfo(pDevice uintptr) (audio.DeviceInfo, error) {
 	var info audio.DeviceInfo
+	info.Backend = audio.BackendWASAPI
 	info.Flow = audio.FlowRender
 
 	var pstrId *uint16

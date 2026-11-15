@@ -46,5 +46,6 @@ export const api = {
   setAsioBufferSize: asioService.setAsioBufferSize,
   configureNativeDSD: asioService.configureNativeDSD,
   confirmNativeDSDRisk: asioService.confirmNativeDSDRisk,
+  cancelNativeDSDEntry: asioService.cancelNativeDSDEntry,
   disableNativeDSD: asioService.disableNativeDSD
 }

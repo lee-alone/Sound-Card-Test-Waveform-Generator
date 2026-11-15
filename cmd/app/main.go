@@ -1,3 +1,5 @@
+//go:build legacy_wails
+
 package main
 
 import (
@@ -9,6 +11,7 @@ import (
 	"runtime"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"sound-signal-generator/internal/audio/asio"
 	"sound-signal-generator/internal/audio/wasapi"
 	"sound-signal-generator/internal/controller"
 	"sound-signal-generator/internal/platform"
@@ -51,7 +54,7 @@ func main() {
 
 	// 2. Initialize Audio Engine & Controller
 	backend := wasapi.NewBackend()
-	ctrl := controller.NewAppController(backend)
+	ctrl := controller.NewAppControllerWithAsioBackend(backend, asio.NewBackend())
 	if err := ctrl.Initialize(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize WASAPI audio backend: %v\n", err)
 	}
@@ -90,14 +93,14 @@ func main() {
 
 	// 5. Create Dark Industrial Instrument Window
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:          "Windows 专业音频测试信号发生器 v2.0",
-		URL:            "/",
-		Width:          1280,
-		Height:         880,
-		MinWidth:       1024,
-		MinHeight:      720,
+		Title:           "Windows 专业音频测试信号发生器 v2.0",
+		URL:             "/",
+		Width:           1280,
+		Height:          880,
+		MinWidth:        1024,
+		MinHeight:       720,
 		DevToolsEnabled: true,
-		BackgroundType: application.BackgroundTypeSolid,
+		BackgroundType:  application.BackgroundTypeSolid,
 		Windows: application.WindowsWindow{
 			BackdropType: application.Auto,
 		},

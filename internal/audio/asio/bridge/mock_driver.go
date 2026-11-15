@@ -357,6 +357,30 @@ func (m *MockDriver) WritePlanarDSD(bufferIndex int, channel int, src []byte) {
 	}
 }
 
+// WrittenDSDBuffer returns a detached copy of a simulated ASIO planar DSD buffer.
+func (m *MockDriver) WrittenDSDBuffer(bufferIndex int, channel int) []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if channel < 0 || channel >= len(m.writtenDSD) || bufferIndex < 0 || bufferIndex >= len(m.writtenDSD[channel]) {
+		return nil
+	}
+	out := make([]byte, len(m.writtenDSD[channel][bufferIndex]))
+	copy(out, m.writtenDSD[channel][bufferIndex])
+	return out
+}
+
+// WrittenPCMBuffer returns a detached copy of a simulated ASIO PCM buffer.
+func (m *MockDriver) WrittenPCMBuffer(bufferIndex int) []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if bufferIndex < 0 || bufferIndex >= len(m.writtenPCM) {
+		return nil
+	}
+	out := make([]byte, len(m.writtenPCM[bufferIndex]))
+	copy(out, m.writtenPCM[bufferIndex])
+	return out
+}
+
 func (m *MockDriver) Close() error {
 	_ = m.Stop()
 	if m.waitHandle != 0 {

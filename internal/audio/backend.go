@@ -33,6 +33,7 @@ func (s ShareMode) String() string {
 // StreamConfig specifies parameters for opening an audio stream.
 type StreamConfig struct {
 	Format         AudioFormat
+	BufferFrames   int
 	ShareMode      ShareMode
 	BufferDuration time.Duration
 	EventDriven    bool

@@ -11,6 +11,7 @@ typedef void* AsioBridgeHandle;
 
 // Bridge Lifecycle
 AsioBridgeHandle asio_bridge_create(const char* clsid_str);
+HRESULT asio_bridge_get_last_create_hresult(void);
 void asio_bridge_destroy(AsioBridgeHandle handle);
 
 // ASIO Methods

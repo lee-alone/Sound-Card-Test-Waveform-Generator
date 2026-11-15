@@ -3,6 +3,7 @@ package asio
 import (
 	"bytes"
 	"testing"
+	"unsafe"
 
 	"sound-signal-generator/internal/audio/asio/bridge"
 	"sound-signal-generator/internal/dsd"
@@ -98,5 +99,56 @@ func TestNativeDSDStreamLifecycle(t *testing.T) {
 
 	if err := streamDSD256.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+func TestNativeDSDStreamPlanarBitOrderAndSilenceLayout(t *testing.T) {
+	profile := bridge.ProfileThesycon
+	profile.SupportedDSDTypes = []bridge.SampleType{bridge.SampleTypeDSDInt8LSB1}
+	driver := bridge.NewMockDriver(profile)
+
+	stream, err := NewNativeDSDStreamWithBufferSize(driver, dsd.DSD256, 2, 128)
+	if err != nil {
+		t.Fatalf("NewNativeDSDStreamWithBufferSize failed: %v", err)
+	}
+	defer stream.Close()
+
+	ptr, err := stream.GetBuffer(16)
+	if err != nil || ptr == 0 {
+		t.Fatalf("GetBuffer failed: ptr=%d err=%v", ptr, err)
+	}
+	staging := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), 4)
+	staging[0], staging[1] = 0x01, 0x80
+	staging[2], staging[3] = 0x02, 0x40
+	if err := stream.ReleaseBuffer(16, 0); err != nil {
+		t.Fatalf("ReleaseBuffer failed: %v", err)
+	}
+
+	left := driver.WrittenDSDBuffer(0, 0)
+	right := driver.WrittenDSDBuffer(0, 1)
+	if !bytes.Equal(left, []byte{0x80, 0x01}) {
+		t.Fatalf("left LSB1 layout mismatch: % x", left)
+	}
+	if !bytes.Equal(right, []byte{0x40, 0x02}) {
+		t.Fatalf("right LSB1 layout mismatch: % x", right)
+	}
+
+	if err := stream.ReleaseBuffer(16, 0x01); err != nil {
+		t.Fatalf("silent ReleaseBuffer failed: %v", err)
+	}
+	if !bytes.Equal(driver.WrittenDSDBuffer(0, 0), []byte{0x69, 0x69}) {
+		t.Fatalf("silent buffer must use DSD idle bytes, got % x", driver.WrittenDSDBuffer(0, 0))
+	}
+}
+
+func TestNativeDSDStreamRejectsPCMOnlyDriver(t *testing.T) {
+	profile := bridge.ProfileThesycon
+	profile.SupportsDSD = false
+	profile.SupportedDSDTypes = nil
+	driver := bridge.NewMockDriver(profile)
+
+	_, err := NewNativeDSDStreamWithBufferSize(driver, dsd.DSD256, 2, 128)
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("Native DSD")) {
+		t.Fatalf("expected explicit Native DSD unsupported error, got %v", err)
 	}
 }

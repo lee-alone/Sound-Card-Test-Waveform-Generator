@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"sound-signal-generator/internal/audio"
+	"sound-signal-generator/internal/audio/asio"
 	"sound-signal-generator/internal/dsd"
 	"sound-signal-generator/internal/engine"
 )
@@ -19,9 +20,23 @@ var (
 type DoPRequest struct {
 	DeviceID     string             `json:"device_id"`
 	DSDFormat    dsd.DSDFormat      `json:"dsd_format"`
-	SampleFormat audio.SampleFormat `json:"sample_format"` // SampleFormat24Packed or SampleFormat24In32
+	SampleFormat audio.SampleFormat `json:"sample_format"` // Always normalized to SampleFormat24In32
 	Channels     int                `json:"channels"`      // default 2
 	BitOrder     dsd.BitOrder       `json:"bit_order"`
+}
+
+// normalizeDoPRequest applies the transport invariants that must not be
+// controlled by callers: carrier rate, 24-in-32 container, stereo unity gain
+// and no DC offset.
+func normalizeDoPRequest(req ExtendedSignalRequest) ExtendedSignalRequest {
+	req.SampleRate = req.DoP.DSDFormat.DoPCarrierSampleRate()
+	req.SampleFormat = audio.SampleFormat24In32
+	req.Channels = 2
+	req.Amplitude = 1.0
+	req.DCOffset = 0.0
+	req.LeftVolumeDBFS = 0.0
+	req.RightVolumeDBFS = 0.0
+	return req
 }
 
 // DoPGuard returns the reference to the controller's safety guard.
@@ -53,9 +68,9 @@ func (c *AppController) ConfigureDoP(req DoPRequest) error {
 	if req.Channels <= 0 {
 		req.Channels = 2
 	}
-	if req.SampleFormat != audio.SampleFormat24Packed && req.SampleFormat != audio.SampleFormat24In32 {
-		req.SampleFormat = audio.SampleFormat24In32 // default to 24-in-32 container
-	}
+	// DoP v1.1 is locked to the 24-in-32 container in this application so a
+	// caller cannot accidentally select a lossy or incompatible PCM layout.
+	req.SampleFormat = audio.SampleFormat24In32
 
 	// 3. Load Golden Vector for requested DSD format
 	golden, err := dsd.GetGoldenVector(req.DSDFormat)
@@ -69,9 +84,14 @@ func (c *AppController) ConfigureDoP(req DoPRequest) error {
 		return fmt.Errorf("failed to create DoP packer: %w", err)
 	}
 
-	// 5. Close engine if already open
+	// 5. Close PCM/Native streams before negotiating the DoP carrier.
 	if c.engine.State() != engine.StateClosed {
 		_ = c.engine.Close()
+	}
+	if c.nativeDSDActive || c.nativeDSDFormat != 0 || c.asioService.NativeDSDMode() {
+		if err := c.deactivateNativeDSDLocked(); err != nil {
+			return fmt.Errorf("failed to restore PCM mode before DoP: %w", err)
+		}
 	}
 
 	// 6. Configure engine at carrier rate in Exclusive mode
@@ -88,6 +108,9 @@ func (c *AppController) ConfigureDoP(req DoPRequest) error {
 		ShareMode:      audio.ShareModeExclusive,
 		BufferDuration: 10 * time.Millisecond,
 		FadeDurationMs: 0.0, // DoP stream must not be altered by volume fades
+	}
+	if _, ok := c.selectedDevice.(*asio.Device); ok {
+		engCfg.BufferFrames = c.asioService.BufferSize()
 	}
 
 	if err := c.engine.Open(engCfg); err != nil {

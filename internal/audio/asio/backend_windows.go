@@ -43,6 +43,13 @@ func (b *Backend) Type() audio.BackendType {
 	return audio.BackendASIO
 }
 
+// IsMock reports whether this backend uses deterministic mock drivers for tests.
+func (b *Backend) IsMock() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.mockMode
+}
+
 func (b *Backend) Initialize() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -78,6 +85,7 @@ func (b *Backend) EnumerateDevices() ([]audio.DeviceInfo, error) {
 			devices[i] = audio.DeviceInfo{
 				ID:        p.Name,
 				Name:      p.Name,
+				Backend:   audio.BackendASIO,
 				IsDefault: i == 0,
 				Flow:      audio.FlowRender,
 				State:     audio.StateActive,
@@ -97,6 +105,7 @@ func (b *Backend) EnumerateDevices() ([]audio.DeviceInfo, error) {
 		devices[i] = audio.DeviceInfo{
 			ID:        d.ID,
 			Name:      d.Description,
+			Backend:   audio.BackendASIO,
 			IsDefault: i == 0,
 			Flow:      audio.FlowRender,
 			State:     audio.StateActive,
@@ -158,10 +167,6 @@ func (b *Backend) createDevice(info audio.DeviceInfo) (audio.Device, error) {
 				cgoDriver, cgoErr := bridge.NewCGODriver(d.CLSID)
 				if cgoErr == nil {
 					return NewDevice(info, cgoDriver), nil
-				}
-				// If CGO instantiation failed (e.g. hardware not attached), fallback to mock with Combo384 profile
-				if d.Name == "ASIO Combo384 Driver" {
-					return NewDevice(info, bridge.NewMockDriver(bridge.ProfileCombo384)), nil
 				}
 				return nil, cgoErr
 			}

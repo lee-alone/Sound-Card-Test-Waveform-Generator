@@ -5,12 +5,15 @@
       <div class="flex items-center gap-2">
         <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span>
         <h2 class="text-base font-bold text-gray-100 uppercase tracking-wider flex items-center gap-2">
-          <span>ASIO 驱动与 Native DSD 原生直通控制面板</span>
+          <span>ASIO 驱动控制面板</span>
           <span class="text-xs px-2 py-0.5 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded font-mono font-semibold">C-BRIDGE</span>
         </h2>
       </div>
 
       <div class="flex items-center gap-2 font-mono text-xs">
+        <span class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded border border-gray-700">
+          模式: {{ status.operating_mode || (status.native_dsd_mode ? 'Native DSD' : 'PCM') }}
+        </span>
         <span class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded border border-gray-700">
           驱动版本: {{ status.driver_version || 'N/A' }}
         </span>
@@ -18,6 +21,10 @@
           SampleType: {{ status.sample_type || 'Unknown' }}
         </span>
       </div>
+    </div>
+
+    <div v-if="statusError" class="mb-3 p-2 bg-red-950/70 border border-red-700 rounded text-red-200 text-xs font-mono">
+      {{ statusError }}
     </div>
 
     <!-- Main Controls Grid -->
@@ -45,8 +52,9 @@
         <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">硬件时钟源 (Clock Source)</label>
         <select
           v-model="selectedClock"
+          :disabled="status.native_dsd_mode"
           @change="handleClockChange"
-          class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-cyan-500 font-mono"
+          class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-cyan-500 font-mono disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <option
             v-for="clk in status.clock_sources"
@@ -66,8 +74,9 @@
         <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">ASIO 缓冲区帧数 (Buffer Size)</label>
         <select
           v-model.number="selectedBufferSize"
+          :disabled="status.native_dsd_mode"
           @change="handleBufferSizeChange"
-          class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-cyan-500 font-mono"
+          class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-cyan-500 font-mono disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <option :value="64">64 frames (超低延迟 1.33ms)</option>
           <option :value="128">128 frames (推荐极低延迟 2.67ms)</option>
@@ -78,6 +87,21 @@
         <p class="text-[11px] text-cyan-400 mt-2 font-mono">
           限制范围: [{{ status.buffer_sizes.min_size }}, {{ status.buffer_sizes.max_size }}] 帧
         </p>
+      </div>
+    </div>
+
+    <!-- Native DSD capability report from the active driver -->
+    <div v-if="status.native_dsd_mode && status.native_dsd_capabilities?.length" class="bg-gray-950/90 rounded border border-gray-800 p-3.5 mb-4 font-mono text-xs">
+      <div class="font-bold text-gray-300 mb-2">Native DSD 驱动能力检测</div>
+      <div class="flex flex-wrap gap-2">
+        <span
+          v-for="cap in status.native_dsd_capabilities"
+          :key="cap.format"
+          :class="cap.supported ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-gray-900 text-gray-500 border-gray-700'"
+          class="px-2 py-1 rounded border"
+        >
+          {{ cap.format }} {{ cap.supported ? '[' + (cap.sample_type || 'DSD') + ']' : '[不支持]' }}
+        </span>
       </div>
     </div>
 
@@ -109,50 +133,50 @@
       </div>
     </div>
 
-    <!-- Native DSD Section (Task T5.3 & T5.5) -->
-    <div class="bg-gradient-to-r from-gray-950 via-gray-900 to-indigo-950/40 p-4 rounded border border-indigo-900/50">
+    <!-- Native DSD test surface is revealed only after explicit activation. -->
+    <div
+      v-if="status.native_dsd_mode"
+      class="bg-gradient-to-r from-gray-950 via-gray-900 to-indigo-950/40 p-4 rounded border border-indigo-900/50"
+    >
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="flex items-center gap-2">
-            <h3 class="text-sm font-bold text-gray-200 uppercase tracking-wider">Native DSD 原生直通直传</h3>
-            <span v-if="status.native_dsd_mode" class="px-2 py-0.5 bg-indigo-600 text-white text-[10px] font-bold rounded animate-pulse">
+            <h3 class="text-sm font-bold text-gray-200 uppercase tracking-wider">Native DSD 测试模式</h3>
+            <span class="px-2 py-0.5 bg-indigo-600 text-white text-[10px] font-bold rounded animate-pulse">
               ACTIVE
             </span>
-            <span v-else class="px-2 py-0.5 bg-gray-800 text-gray-400 text-[10px] rounded">
-              PCM MODE
-            </span>
           </div>
-          <p class="text-xs text-gray-400 mt-1">
-            独立通道无交织缓冲 &bull; 纯净 1-bit 比特流 &bull; 无任何 DoP Marker &bull; 支持 DSD256 (11.2896MHz) 与 DSD512 (22.5792MHz)
+          <p class="text-xs text-gray-400 mt-1 font-mono">
+            {{ status.selected_dsd_format || selectedDSDFormat }} &bull; {{ status.sample_type || 'Native DSD' }} &bull; 独立通道无交织 1-bit 缓冲
           </p>
         </div>
 
-        <div class="flex items-center gap-3">
-          <select
-            v-model="selectedDSDFormat"
-            class="bg-gray-900 border border-indigo-800 rounded px-3 py-1.5 text-xs text-gray-200 font-mono"
-            :disabled="status.native_dsd_mode"
-          >
-            <option value="DSD256">DSD256 (11.2896 MHz)</option>
-            <option value="DSD512">DSD512 (22.5792 MHz 驱动可选)</option>
-          </select>
-
-          <button
-            v-if="!status.native_dsd_mode"
-            @click="triggerNativeDSDActivation"
-            class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded shadow-[0_0_12px_rgba(99,102,241,0.5)] transition"
-          >
-            启用 Native DSD 直通
-          </button>
-          <button
-            v-else
-            @click="disableNativeDSD"
-            class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-bold rounded transition"
-          >
-            恢复 PCM 模式
-          </button>
-        </div>
+        <button
+          @click="disableNativeDSD"
+          class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-bold rounded transition"
+        >
+          关闭 Native DSD · 恢复 PCM
+        </button>
       </div>
+    </div>
+
+    <div
+      v-else
+      class="bg-gray-950/80 p-4 rounded border border-gray-800 flex flex-wrap items-center justify-between gap-3"
+    >
+      <div>
+        <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider">当前输出：PCM</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Native DSD 默认关闭。只有主动选择测试格式并完成核心安全确认后，才会启用专用 1-bit 测试界面。
+        </p>
+      </div>
+      <button
+        @click="openNativeDSDEntry"
+        :disabled="!status.active_driver"
+        class="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-xs font-bold rounded transition disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        进入 Native DSD 测试模式…
+      </button>
     </div>
 
     <!-- Mandatory Native DSD Safety Warning Modal (T5.5 Unskippable Confirmation) -->
@@ -175,6 +199,19 @@
             <li>在开启前，必须将后级放大器音量旋钮调至最低或断开耳机；</li>
             <li>系统已在 Controller 核心层实施硬件守卫：绕过界面直接调用 RPC 也必须完成校验。</li>
           </ul>
+        </div>
+
+        <div class="mb-5">
+          <label class="block text-xs font-bold text-gray-300 mb-1.5">
+            Native DSD 测试格式
+          </label>
+          <select
+            v-model="selectedDSDFormat"
+            class="w-full bg-gray-900 border border-indigo-800 rounded px-3 py-2 text-sm text-gray-100 font-mono focus:border-red-500 focus:outline-none"
+          >
+            <option value="DSD256">DSD256 (11.2896 MHz)</option>
+            <option value="DSD512">DSD512 (22.5792 MHz 驱动可选)</option>
+          </select>
         </div>
 
         <div class="mb-5">
@@ -216,10 +253,13 @@ import { ref, onMounted } from 'vue'
 import { api } from '../api'
 import type { AsioStatus } from '../types'
 
+const statusError = ref('')
+
 const status = ref<AsioStatus>({
-  active_driver: 'ASIO Combo384 Driver',
-  driver_version: '0x0103',
-  sample_type: 'ASIOSTDSDInt8LSB1',
+  active_driver: '',
+  driver_version: '',
+  sample_type: 'ASIOSTInt32LSB',
+  operating_mode: 'PCM',
   clock_sources: [
     { index: 0, name: 'Internal Master Clock', is_current_source: true },
     { index: 1, name: 'S/PDIF Word Clock', is_current_source: false }
@@ -245,7 +285,7 @@ const status = ref<AsioStatus>({
   },
   native_dsd_mode: false,
   native_dsd_confirmed: false,
-  selected_dsd_format: 'DSD256'
+  selected_dsd_format: ''
 })
 
 const selectedDriver = ref('ASIO Combo384 Driver')
@@ -257,14 +297,39 @@ const showSafetyWarning = ref(false)
 const confirmationInput = ref('')
 const confirmationError = ref('')
 
+function forceNativeDSDStatus(format: string) {
+  status.value = {
+    ...status.value,
+    operating_mode: 'Native DSD',
+    native_dsd_mode: true,
+    native_dsd_active: true,
+    native_dsd_confirmed: true,
+    selected_dsd_format: format
+  }
+}
+
+function forcePCMStatus() {
+  status.value = {
+    ...status.value,
+    operating_mode: 'PCM',
+    native_dsd_mode: false,
+    native_dsd_active: false,
+    native_dsd_confirmed: false,
+    selected_dsd_format: '',
+    native_dsd_buffer_frames: 0
+  }
+}
+
 async function refreshStatus() {
   try {
     const s = await api.getAsioStatus()
     status.value = s
+    statusError.value = ''
     selectedDriver.value = s.active_driver || selectedDriver.value
     selectedClock.value = s.active_clock_index
     selectedBufferSize.value = s.active_buffer_size
-  } catch (e) {
+  } catch (e: any) {
+    statusError.value = e?.message || String(e)
     console.error('Failed to get ASIO status:', e)
   }
 }
@@ -276,6 +341,7 @@ onMounted(() => {
 async function handleDriverChange() {
   try {
     await api.selectAsioDriver(selectedDriver.value)
+    forcePCMStatus()
     await refreshStatus()
   } catch (e) {
     console.error('Failed to switch ASIO driver:', e)
@@ -300,50 +366,75 @@ async function handleBufferSizeChange() {
   }
 }
 
-function triggerNativeDSDActivation() {
-  if (status.value.native_dsd_confirmed) {
-    enableNativeDSD()
-  } else {
-    confirmationInput.value = ''
-    confirmationError.value = ''
-    showSafetyWarning.value = true
+function openNativeDSDEntry() {
+  if (!status.value.active_driver) {
+    statusError.value = '请先选择可用的 ASIO 驱动'
+    return
   }
+  confirmationInput.value = ''
+  confirmationError.value = ''
+  statusError.value = ''
+  showSafetyWarning.value = true
 }
 
 async function confirmNativeDSD() {
-  if (confirmationInput.value.trim().toUpperCase() !== 'YES') {
+  if (confirmationInput.value !== 'YES') {
     confirmationError.value = '必须准确输入 YES 方可确认'
     return
   }
 
   try {
     await api.confirmNativeDSDRisk('YES')
-    showSafetyWarning.value = false
-    await enableNativeDSD()
+    if (await enableNativeDSD()) {
+      showSafetyWarning.value = false
+      confirmationInput.value = ''
+    }
   } catch (e: any) {
     confirmationError.value = e.message || '确认失败'
   }
 }
 
-function cancelNativeDSD() {
-  showSafetyWarning.value = false
+async function cancelNativeDSD() {
+  try {
+    await api.cancelNativeDSDEntry()
+  } catch (e: any) {
+    statusError.value = e?.message || String(e)
+  } finally {
+    showSafetyWarning.value = false
+    confirmationInput.value = ''
+    confirmationError.value = ''
+  }
 }
 
-async function enableNativeDSD() {
+async function enableNativeDSD(): Promise<boolean> {
   try {
     await api.configureNativeDSD(selectedDSDFormat.value)
+    forceNativeDSDStatus(selectedDSDFormat.value)
     await refreshStatus()
-  } catch (e) {
-    console.error('Failed to configure Native DSD:', e)
+    if (!status.value.native_dsd_mode) {
+      confirmationError.value = 'Native DSD 未激活，输出保持 PCM/静音'
+      return false
+    }
+    statusError.value = ''
+    return true
+  } catch (e: any) {
+    statusError.value = e?.message || String(e)
+    confirmationError.value = statusError.value
+    await refreshStatus()
+    return false
   }
 }
 
 async function disableNativeDSD() {
   try {
     await api.disableNativeDSD()
+    forcePCMStatus()
     await refreshStatus()
-  } catch (e) {
-    console.error('Failed to disable Native DSD:', e)
+    confirmationInput.value = ''
+    confirmationError.value = ''
+  } catch (e: any) {
+    statusError.value = e?.message || String(e)
+    await refreshStatus()
   }
 }
 </script>

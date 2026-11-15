@@ -2,6 +2,7 @@ package asio
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"sound-signal-generator/internal/audio"
@@ -58,6 +59,7 @@ func (d *Device) ProbeCapabilities(candidates []audio.AudioFormat, shareMode aud
 	if err != nil {
 		return nil, err
 	}
+	chInfo, chErr := d.driver.GetChannelInfo(0, false)
 
 	results := make([]audio.FormatSupportResult, len(candidates))
 	for i, cand := range candidates {
@@ -72,7 +74,13 @@ func (d *Device) ProbeCapabilities(candidates []audio.AudioFormat, shareMode aud
 			continue
 		}
 
-		if d.driver.CanSampleRate(float64(cand.SampleRate)) {
+		if chErr != nil {
+			res.Status = audio.StatusDriverError
+			res.ErrorMessage = chErr.Error()
+		} else if !pcmFormatMatchesSampleType(cand.SampleFormat, chInfo.SampleType) {
+			res.Status = audio.StatusUnsupported
+			res.ErrorMessage = fmt.Sprintf("ASIO sample type %s is incompatible with %s", chInfo.SampleType.String(), cand.SampleFormat.String())
+		} else if d.driver.CanSampleRate(float64(cand.SampleRate)) {
 			res.Status = audio.StatusSupported
 		} else {
 			res.Status = audio.StatusUnsupported

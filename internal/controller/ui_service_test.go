@@ -8,7 +8,7 @@ import (
 func TestUIService_FullWorkflow(t *testing.T) {
 	mockDev := &MockControllerDevice{stream: &MockControllerStream{bufferSize: 1920}}
 	backend := &MockBackend{device: mockDev}
-	ctrl := NewAppController(backend)
+	ctrl := newTestAppController(backend)
 	_ = ctrl.Initialize()
 	defer ctrl.Close()
 

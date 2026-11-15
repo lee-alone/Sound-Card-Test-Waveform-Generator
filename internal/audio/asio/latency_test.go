@@ -63,7 +63,7 @@ func TestASIOAudioStreamStreamingLifecycle(t *testing.T) {
 		Format: audio.AudioFormat{
 			SampleRate:   48000,
 			Channels:     2,
-			SampleFormat: audio.SampleFormat32Float,
+			SampleFormat: audio.SampleFormat24In32,
 		},
 		ShareMode: audio.ShareModeExclusive,
 	}
