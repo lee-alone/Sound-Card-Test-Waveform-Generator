@@ -3,21 +3,79 @@ package giuui
 import (
 	"fmt"
 	"math"
+	"time"
 
 	g "github.com/AllenDang/giu"
 	"sound-signal-generator/internal/controller"
+	"sound-signal-generator/internal/dsp"
 	"sound-signal-generator/internal/ui/i18n"
 )
 
-// MetrologyWidget presents the secondary readouts directly under the scope.
-// Values are kept compact so the eye can compare them without leaving the
-// waveform.
+// MetrologyWidget presents the secondary readouts directly under the scope or spectrum analyzer.
+// Values are kept compact so the eye can compare them without leaving the chart.
 type MetrologyWidget struct {
 	state *UIState
 }
 
 func NewMetrologyWidget(state *UIState) *MetrologyWidget {
 	return &MetrologyWidget{state: state}
+}
+
+func (m *MetrologyWidget) formatSignalFrequency(waveID controller.WaveformType) string {
+	switch waveID {
+	case controller.WaveformSine,
+		controller.WaveformPolyBlepSquare,
+		controller.WaveformPolyBlepTriangle:
+		return formatFrequency(math.Max(1.0, float64(m.state.Frequency)))
+
+	case controller.WaveformLinearSweep, controller.WaveformLogarithmicSweep:
+		start := math.Max(1.0, float64(m.state.SweepStartFreq))
+		end := math.Max(1.0, float64(m.state.SweepEndFreq))
+		if m.state.IsOutputRunning() {
+			anchor := m.state.SignalStartTime
+			if anchor.IsZero() {
+				anchor = m.state.StreamStartTime
+			}
+			if !anchor.IsZero() {
+				elapsed := time.Since(anchor).Seconds()
+				duration := math.Max(0.5, float64(m.state.SweepDurationSec))
+				t := elapsed
+				if m.state.SweepLoop && duration > 0 {
+					t = math.Mod(elapsed, duration)
+					if t < 0 {
+						t += duration
+					}
+				} else if t > duration {
+					t = duration
+				}
+				progress := 1.0
+				if duration > 0 {
+					progress = t / duration
+				}
+				currentFreq := sweepFrequencyAt(start, end, duration, progress, waveID == controller.WaveformLogarithmicSweep)
+				return fmt.Sprintf("%s (%.0f%%)", formatFrequency(currentFreq), progress*100.0)
+			}
+		}
+		return fmt.Sprintf("%s – %s", formatFrequency(start), formatFrequency(end))
+
+	case controller.WaveformWhiteNoise:
+		return i18n.T("spectrum.signal_white_noise")
+
+	case controller.WaveformPinkNoise:
+		return i18n.T("spectrum.signal_pink_noise")
+
+	case controller.WaveformMultitoneSMPTE:
+		return "60 Hz + 7 kHz"
+
+	case controller.WaveformMultitoneCCIF:
+		return "19 kHz + 20 kHz"
+
+	case controller.WaveformDoP:
+		return "1 kHz (DSD64)"
+
+	default:
+		return formatFrequency(math.Max(1.0, float64(m.state.Frequency)))
+	}
 }
 
 func (m *MetrologyWidget) Build() g.Widget {
@@ -70,6 +128,24 @@ func (m *MetrologyWidget) Build() g.Widget {
 	if nyquistUsagePct > 100.0 {
 		nyquistColor = ColorAlarmRed
 		nyquistText = i18n.T("metrology.over_limit_fmt", nyquistUsagePct)
+	}
+
+	if m.state.ScopeDisplayMode == ScopeDisplaySpectrum {
+		freqText := m.formatSignalFrequency(waveID)
+		deltaF := float64(targetRate) / float64(dsp.DefaultSpectrumFFTSize)
+		fftResText := fmt.Sprintf("Δf %.2f Hz", deltaF)
+
+		return g.Table().
+			Flags(g.TableFlagsNoSavedSettings | g.TableFlagsSizingStretchSame | g.TableFlagsNoBordersInBody).
+			NoHeader(true).
+			Rows(g.TableRow(
+				metricCell(i18n.T("metrology.peak"), fmt.Sprintf("%.4f FS", vPeakFS), ColorPhosphorGreen),
+				metricCell("RMS", fmt.Sprintf("%.4f FS", vRmsFS), ColorDigitalCyan),
+				metricCell(i18n.T("metrology.crest_factor"), fmt.Sprintf("%.2f dB", crestFactorDB), ColorTextBright),
+				metricCell(i18n.T("metrology.spectrum_freq"), freqText, ColorTextBright),
+				metricCell(i18n.T("metrology.fft_resolution"), fftResText, ColorTextMuted),
+				metricCell(i18n.T("metrology.safety_margin"), nyquistText, nyquistColor),
+			))
 	}
 
 	return g.Table().

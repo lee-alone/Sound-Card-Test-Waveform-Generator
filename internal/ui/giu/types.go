@@ -186,6 +186,14 @@ func ChannelModeLabels() []string {
 	return labels
 }
 
+// ScopeDisplayMode selects between the time-domain oscilloscope and frequency-domain spectrum analyzer.
+type ScopeDisplayMode int32
+
+const (
+	ScopeDisplayWaveform ScopeDisplayMode = iota
+	ScopeDisplaySpectrum
+)
+
 // UIState encapsulates the GUI mutable state across loop renders.
 type UIState struct {
 	// Device & Format Selection
@@ -203,7 +211,8 @@ type UIState struct {
 	// Generator Parameters
 	SelectedWaveformIndex int32
 	SelectedPresetIndex   int32
-	Frequency             float32 // Signal frequency in Hz
+	ScopeDisplayMode      ScopeDisplayMode // ScopeDisplayWaveform or ScopeDisplaySpectrum
+	Frequency             float32          // Signal frequency in Hz
 	LeftVolumeDBFS        float32 // Left dBFS [-144, 0]
 	RightVolumeDBFS       float32 // Right dBFS [-144, 0]
 	LinkChannels          bool

@@ -32,6 +32,7 @@ type GeneratorPanel struct {
 	onParamChanged    func()
 	requestDoPConfirm func()
 	scopeWidget       *ScopeWidget
+	spectrumWidget    *SpectrumWidget
 	metrologyWidget   *MetrologyWidget
 	benchPresets      *BenchPresetsBar
 	animateScope      atomic.Bool
@@ -53,6 +54,7 @@ func NewGeneratorPanel(
 		onParamChanged:    onParamChanged,
 		requestDoPConfirm: requestDoPConfirm,
 		scopeWidget:       NewScopeWidget(state),
+		spectrumWidget:    NewSpectrumWidget(state),
 		metrologyWidget:   NewMetrologyWidget(state),
 		benchPresets:      NewBenchPresetsBar(state, onParamChanged),
 	}
@@ -274,7 +276,11 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 	contentW := width - px(40)
 	selectedWave := p.selectedWaveform()
 	streamLocked := p.state.IsOutputRunning()
-	p.animateScope.Store(streamLocked && p.scopeWidget.NeedsAnimation())
+	scopeNeedsAnim := p.scopeWidget.NeedsAnimation()
+	if p.state.ScopeDisplayMode == ScopeDisplaySpectrum {
+		scopeNeedsAnim = p.spectrumWidget.NeedsAnimation()
+	}
+	p.animateScope.Store(streamLocked && scopeNeedsAnim)
 	waveIndex := clampIndex(p.state.SelectedWaveformIndex, len(WaveformOptions))
 	wavePreview := WaveformLabelAt(waveIndex)
 
@@ -309,7 +315,7 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 	}
 
 	scopeResetControl := func() g.Widget {
-		if p.scopeWidget.XZoomIsDefault() {
+		if p.state.ScopeDisplayMode != ScopeDisplayWaveform || p.scopeWidget.XZoomIsDefault() {
 			return g.Dummy(px(1), px(1))
 		}
 		return StyleQuietButton(
@@ -318,8 +324,29 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 				OnClick(p.scopeWidget.ResetXZoom),
 		)
 	}()
+
+	scopeSegmentedControl := func() g.Widget {
+		isWave := p.state.ScopeDisplayMode == ScopeDisplayWaveform
+		btnWave := g.Button(i18n.T("generator.scope.tab_waveform")).Size(px(88), px(22)).OnClick(func() {
+			p.state.ScopeDisplayMode = ScopeDisplayWaveform
+		})
+		btnSpec := g.Button(i18n.T("generator.scope.tab_spectrum")).Size(px(88), px(22)).OnClick(func() {
+			p.state.ScopeDisplayMode = ScopeDisplaySpectrum
+		})
+
+		var w1, w2 g.Widget
+		if isWave {
+			w1 = StylePrimaryButton(btnWave)
+			w2 = StyleQuietButton(btnSpec)
+		} else {
+			w1 = StyleQuietButton(btnWave)
+			w2 = StylePrimaryButton(btnSpec)
+		}
+		return g.Row(w1, w2)
+	}()
+
 	scopeHeader := g.Row(
-		captionLabel(i18n.T("generator.scope.time_domain")),
+		scopeSegmentedControl,
 		g.Spacing(),
 		func() g.Widget {
 			if streamLocked {
@@ -341,12 +368,19 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		scopeLogicalHeight = 150
 	}
 
+	var displayPlot g.Widget
+	if p.state.ScopeDisplayMode == ScopeDisplaySpectrum {
+		displayPlot = p.spectrumWidget.Build(scopeLogicalHeight)
+	} else {
+		displayPlot = p.scopeWidget.Build(scopeLogicalHeight)
+	}
+
 	scopeColumn := barePanel(
 		scopeW,
 		bodyH,
 		ColorSurface,
 		scopeHeader,
-		p.scopeWidget.Build(scopeLogicalHeight),
+		displayPlot,
 		p.metrologyWidget.Build(),
 	)
 
