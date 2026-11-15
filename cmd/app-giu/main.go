@@ -1,26 +1,31 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"runtime"
 
 	"sound-signal-generator/internal/audio/asio"
 	"sound-signal-generator/internal/audio/wasapi"
+	"sound-signal-generator/internal/cli"
 	"sound-signal-generator/internal/controller"
 	giuui "sound-signal-generator/internal/ui/giu"
 )
 
 func main() {
-	versionFlag := flag.Bool("version", false, "Print version information and exit")
-	flag.Parse()
-
-	if *versionFlag {
-		fmt.Println("Windows Professional Audio Signal Generator (Dear ImGui Native Console v2.0)")
+	// No arguments launches the GUI. Any CLI flag runs through the same
+	// executable, so one binary supports both graphical and command-line use.
+	if len(os.Args) == 1 {
+		// Close the automatically allocated console before showing the GUI.
+		detachConsoleForGUI()
+		runGUI()
 		return
 	}
 
+	os.Exit(cli.Run(os.Args[1:]))
+}
+
+func runGUI() {
 	// Lock OS thread for COM & GLFW interactions
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
