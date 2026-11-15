@@ -171,7 +171,7 @@ func (p *GeneratorPanel) preciseFrequencyInput(field *preciseFrequencyField, val
 			field.text = formatEditableFrequency(float64(*value))
 		}
 		g.InputText(&field.text).
-			Label(id).
+			Label("Hz" + id).
 			Hint("Hz").
 			Flags(g.InputTextFlagsCharsDecimal | g.InputTextFlagsEnterReturnsTrue).
 			Size(width).
@@ -214,7 +214,7 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 	contentW := width - px(40)
 	selectedWave := p.selectedWaveform()
 	streamLocked := p.state.IsOutputRunning()
-	p.animateScope.Store(p.scopeWidget.NeedsAnimation())
+	p.animateScope.Store(streamLocked && p.scopeWidget.NeedsAnimation())
 	waveIndex := clampIndex(p.state.SelectedWaveformIndex, len(WaveformOptions))
 	wavePreview := WaveformOptions[waveIndex].Label
 
@@ -261,7 +261,14 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		)
 	}()
 	scopeHeader := g.Row(
-		captionLabel("时域预览"),
+		captionLabel("时域示波器"),
+		g.Spacing(),
+		func() g.Widget {
+			if streamLocked {
+				return StyleBadge("实时", ColorPhosphorDark, ColorPhosphorGreen)
+			}
+			return StyleBadge("待机", ColorSurfaceRaise, ColorTextMuted)
+		}(),
 		g.Spacing(),
 		fontLabel(waveDescription(selectedWave), 10.5, ColorTextMuted),
 		g.Spacing(),
@@ -292,8 +299,9 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 
 	switch selectedWave {
 	case controller.WaveformSine, controller.WaveformPolyBlepSquare, controller.WaveformPolyBlepTriangle:
-		frequencyInputW := px(86)
-		frequencySliderW := railContentW - frequencyInputW - px(8)
+		frequencyFieldW := px(86)
+		frequencyInputW := px(64)
+		frequencySliderW := railContentW - frequencyFieldW - px(8)
 		widgets = append(widgets,
 			captionLabel(fmt.Sprintf("频率  ·  最高 %.0f Hz · 可精确输入", p.GetMaxSafeFrequency())),
 			g.Row(
@@ -314,8 +322,9 @@ func (p *GeneratorPanel) Build(width, height float32) g.Widget {
 		)
 
 	case controller.WaveformLinearSweep, controller.WaveformLogarithmicSweep:
-		frequencyInputW := px(86)
-		frequencySliderW := railContentW - frequencyInputW - px(8)
+		frequencyFieldW := px(86)
+		frequencyInputW := px(64)
+		frequencySliderW := railContentW - frequencyFieldW - px(8)
 		widgets = append(widgets,
 			captionLabel("起始频率 · 可精确输入"),
 			g.Row(

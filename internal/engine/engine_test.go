@@ -196,6 +196,54 @@ func TestEngine_ReplaceGeneratorWhileRunning(t *testing.T) {
 	_ = eng.Close()
 }
 
+func TestEngineSharedModeUsesDevicePeriodCallbacks(t *testing.T) {
+	eng := NewAudioEngine()
+	mockStream := NewMockStream(1920, 4) // 40 ms of stereo 16-bit audio at 48 kHz.
+	mockStream.getBufferFn = func(numFrames int) (uintptr, error) {
+		if numFrames != 480 {
+			return 0, errors.New("shared-mode callback must request one device period")
+		}
+		return 0, nil
+	}
+	dev := &MockEngineDevice{stream: mockStream}
+
+	cfg := EngineConfig{
+		Device: dev,
+		Format: audio.AudioFormat{
+			SampleRate:   48000,
+			Channels:     2,
+			SampleFormat: audio.SampleFormat16Int,
+		},
+		ShareMode:      audio.ShareModeShared,
+		BufferDuration: 10 * time.Millisecond,
+		FadeDurationMs: 10.0,
+	}
+	if err := eng.Open(cfg); err != nil {
+		t.Fatalf("eng.Open failed: %v", err)
+	}
+
+	sine := dsp.NewSineGenerator()
+	_ = sine.Prepare(dsp.Config{SampleRate: 48000, Frequency: 1000.0, Amplitude: 0.5})
+	if err := eng.Prime(sine); err != nil {
+		t.Fatalf("eng.Prime failed: %v", err)
+	}
+	if err := eng.Start(); err != nil {
+		t.Fatalf("eng.Start failed: %v", err)
+	}
+
+	time.Sleep(35 * time.Millisecond)
+	diag := eng.Diagnostics()
+	if diag.RenderCallbackCount == 0 {
+		t.Fatal("expected render callbacks in shared mode")
+	}
+	if diag.UnderrunCount != 0 {
+		t.Fatalf("shared-mode period callbacks must not report false underruns, got %d", diag.UnderrunCount)
+	}
+
+	_ = eng.Stop()
+	_ = eng.Close()
+}
+
 func TestFaultInjectionSafeMuteInOnePeriod(t *testing.T) {
 	eng := NewAudioEngine()
 	mockStream := NewMockStream(480, 4)

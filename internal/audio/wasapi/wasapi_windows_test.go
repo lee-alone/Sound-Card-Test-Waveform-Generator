@@ -109,6 +109,22 @@ func TestConvertAudioFormatToWaveFormat(t *testing.T) {
 	}
 }
 
+func TestStreamFlagsEnableSharedModeAutomaticConversion(t *testing.T) {
+	shared := streamFlagsForShareMode(audio.ShareModeShared)
+	wantShared := uint32(AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+		AUDCLNT_STREAMFLAGS_NOPERSIST |
+		AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+		AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY)
+	if shared != wantShared {
+		t.Fatalf("shared flags = 0x%08X, want 0x%08X", shared, wantShared)
+	}
+
+	exclusive := streamFlagsForShareMode(audio.ShareModeExclusive)
+	if exclusive != uint32(AUDCLNT_STREAMFLAGS_EVENTCALLBACK) {
+		t.Fatalf("exclusive flags = 0x%08X, want event callback only", exclusive)
+	}
+}
+
 func TestCOMAndMMCSSInitialization(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

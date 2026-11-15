@@ -67,6 +67,10 @@ func NewScopeWidget(state *UIState) *ScopeWidget {
 // time. Periodic waves are intentionally stationary so the trace remains easy
 // to read; noise and sweeps must keep moving.
 func (s *ScopeWidget) NeedsAnimation() bool {
+	if !s.showLiveTrace() {
+		return false
+	}
+
 	switch s.selectedWaveform() {
 	case controller.WaveformLinearSweep,
 		controller.WaveformLogarithmicSweep,
@@ -76,6 +80,13 @@ func (s *ScopeWidget) NeedsAnimation() bool {
 	default:
 		return false
 	}
+}
+
+// showLiveTrace gates the oscilloscope on the physical output state. A
+// stopped generator has no signal to display, so the UI must not synthesize a
+// preview or advance any display clock while in standby.
+func (s *ScopeWidget) showLiveTrace() bool {
+	return s.state.IsOutputRunning()
 }
 
 // GenerateTraces preserves the original trace-only API used by existing tests
@@ -382,6 +393,12 @@ func (s *ScopeWidget) Build(height int) g.Widget {
 	if height < 120 {
 		height = 120
 	}
+
+	if !s.showLiveTrace() {
+		s.plotHovered = false
+		return s.buildStandbyPlot(height)
+	}
+
 	s.applyHoveredWheelZoom()
 
 	frame := s.GenerateFrame(scopeDefaultPoints)
@@ -405,6 +422,23 @@ func (s *ScopeWidget) Build(height int) g.Widget {
 			}),
 		)
 	return plot
+}
+
+// buildStandbyPlot preserves the scope frame and grid while making it clear
+// that no waveform is being generated. It intentionally contains no LineXY
+// widgets, so opening the application does not start preview synthesis.
+func (s *ScopeWidget) buildStandbyPlot(height int) g.Widget {
+	return g.Plot("##oscilloscope").
+		Size(-1, int(px(float32(height)))).
+		SetXAxisLabel(g.AxisX1, "时间").
+		SetYAxisLabel(g.AxisY1, "幅度 / FS").
+		AxisLimits(0, 1, -1.08, 1.08, g.ConditionAlways).
+		Plots(
+			g.Custom(func() {
+				implot.PlotText("输出待机", 0.5, 0.10)
+				implot.PlotText("点击“开始输出”后显示波形", 0.5, -0.18)
+			}),
+		)
 }
 
 // XZoom returns the multiplier applied to the default X-axis window. Values

@@ -250,6 +250,33 @@ func TestScopeWidget_Synthesis(t *testing.T) {
 	}
 }
 
+func TestScopeWidget_IsGatedByOutputState(t *testing.T) {
+	state := NewUIState()
+	state.SelectedWaveformIndex = 5 // White noise exercises the animation path.
+	scope := NewScopeWidget(state)
+
+	if scope.showLiveTrace() {
+		t.Fatal("new scope must not display a trace before output starts")
+	}
+	if scope.NeedsAnimation() {
+		t.Fatal("standby scope must not request preview animation")
+	}
+
+	state.IsActiveStream = true
+	if !scope.showLiveTrace() {
+		t.Fatal("active transport should enable the live trace")
+	}
+	if !scope.NeedsAnimation() {
+		t.Fatal("active noise trace should request preview animation")
+	}
+
+	state.IsActiveStream = false
+	state.Diagnostics.State = engine.StateRunning
+	if !scope.showLiveTrace() {
+		t.Fatal("running diagnostics state should also enable the live trace")
+	}
+}
+
 func TestScopeWidget_TimeAxisTracksFrequency(t *testing.T) {
 	state := NewUIState()
 	state.SelectedWaveformIndex = 0   // Sine

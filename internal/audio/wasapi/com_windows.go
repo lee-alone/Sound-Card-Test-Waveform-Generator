@@ -14,12 +14,12 @@ var (
 	modOle32 = windows.NewLazySystemDLL("ole32.dll")
 	modAvrt  = windows.NewLazySystemDLL("avrt.dll")
 
-	procCoInitializeEx               = modOle32.NewProc("CoInitializeEx")
-	procCoUninitialize               = modOle32.NewProc("CoUninitialize")
-	procCoCreateInstance             = modOle32.NewProc("CoCreateInstance")
-	procPropVariantClear             = modOle32.NewProc("PropVariantClear")
-	procCoTaskMemFree                = modOle32.NewProc("CoTaskMemFree")
-	procAvSetMmThreadCharacteristics = modAvrt.NewProc("AvSetMmThreadCharacteristicsW")
+	procCoInitializeEx                  = modOle32.NewProc("CoInitializeEx")
+	procCoUninitialize                  = modOle32.NewProc("CoUninitialize")
+	procCoCreateInstance                = modOle32.NewProc("CoCreateInstance")
+	procPropVariantClear                = modOle32.NewProc("PropVariantClear")
+	procCoTaskMemFree                   = modOle32.NewProc("CoTaskMemFree")
+	procAvSetMmThreadCharacteristics    = modAvrt.NewProc("AvSetMmThreadCharacteristicsW")
 	procAvRevertMmThreadCharacteristics = modAvrt.NewProc("AvRevertMmThreadCharacteristics")
 )
 
@@ -29,27 +29,27 @@ const (
 	COINIT_APARTMENTTHREADED = 0x2
 	COINIT_DISABLE_OLE1DDE   = 0x4
 
-	CLSCTX_ALL            = 0x17
-	CLSCTX_INPROC_SERVER  = 0x1
+	CLSCTX_ALL           = 0x17
+	CLSCTX_INPROC_SERVER = 0x1
 
 	STGM_READ = 0x00000000
 )
 
 // HRESULT constants
 const (
-	S_OK                                int32 = 0
-	S_FALSE                             int32 = 1
-	E_FAIL                              int32 = -2147467259 // 0x80004005
-	E_POINTER                           int32 = -2147467261 // 0x80004003
-	E_INVALIDARG                        int32 = -2147024809 // 0x80070057
-	RPC_E_CHANGED_MODE                  int32 = -2147417850 // 0x80010106
-	AUDCLNT_E_NOT_INITIALIZED           int32 = -2004287487 // 0x88890001
-	AUDCLNT_E_ALREADY_INITIALIZED       int32 = -2004287486 // 0x88890002
-	AUDCLNT_E_DEVICE_INVALIDATED        int32 = -2004287484 // 0x88890004
-	AUDCLNT_E_UNSUPPORTED_FORMAT        int32 = -2004287480 // 0x88890008
+	S_OK                                 int32 = 0
+	S_FALSE                              int32 = 1
+	E_FAIL                               int32 = -2147467259 // 0x80004005
+	E_POINTER                            int32 = -2147467261 // 0x80004003
+	E_INVALIDARG                         int32 = -2147024809 // 0x80070057
+	RPC_E_CHANGED_MODE                   int32 = -2147417850 // 0x80010106
+	AUDCLNT_E_NOT_INITIALIZED            int32 = -2004287487 // 0x88890001
+	AUDCLNT_E_ALREADY_INITIALIZED        int32 = -2004287486 // 0x88890002
+	AUDCLNT_E_DEVICE_INVALIDATED         int32 = -2004287484 // 0x88890004
+	AUDCLNT_E_UNSUPPORTED_FORMAT         int32 = -2004287480 // 0x88890008
 	AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED int32 = -2004287474 // 0x8889000E
-	AUDCLNT_E_DEVICE_IN_USE             int32 = -2004287478 // 0x8889000A
-	AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED   int32 = -2004287463 // 0x88890019
+	AUDCLNT_E_DEVICE_IN_USE              int32 = -2004287478 // 0x8889000A
+	AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED    int32 = -2004287463 // 0x88890019
 )
 
 // WASAPI Share and Stream Flags
@@ -57,8 +57,10 @@ const (
 	AUDCLNT_SHAREMODE_SHARED    = 0
 	AUDCLNT_SHAREMODE_EXCLUSIVE = 1
 
-	AUDCLNT_STREAMFLAGS_EVENTCALLBACK = 0x00040000
-	AUDCLNT_STREAMFLAGS_NOPERSIST     = 0x00080000
+	AUDCLNT_STREAMFLAGS_EVENTCALLBACK       = 0x00040000
+	AUDCLNT_STREAMFLAGS_NOPERSIST           = 0x00080000
+	AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM      = 0x80000000
+	AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY = 0x08000000
 )
 
 // DataFlow and Role for MMDeviceEnumerator
@@ -67,9 +69,9 @@ const (
 	EDataFlowCapture = 1
 	EDataFlowAll     = 2
 
-	ERoleConsole         = 0
-	ERoleMultimedia      = 1
-	ERoleCommunications  = 2
+	ERoleConsole        = 0
+	ERoleMultimedia     = 1
+	ERoleCommunications = 2
 
 	DEVICE_STATE_ACTIVE     = 0x00000001
 	DEVICE_STATE_DISABLED   = 0x00000002

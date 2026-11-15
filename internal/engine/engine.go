@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -457,9 +458,41 @@ func (e *AudioEngine) renderLoop() {
 	numFrames := e.bufferPool.NumFrames
 	channels := e.bufferPool.Channels
 	rawBytes := e.bufferPool.RawBytes
+	stream := e.stream
+	if stream == nil {
+		e.fader.Mute()
+		return
+	}
 	numChannels := e.cfg.Format.Channels
 	allowClipping := e.cfg.AllowClipping
 	audioFormat := e.cfg.Format
+	callbackFrames := numFrames
+	callbackPeriod := time.Duration(float64(numFrames) / float64(audioFormat.SampleRate) * float64(time.Second))
+
+	// WASAPI shared-mode buffers can span multiple engine periods. The event
+	// handle fires once per device period, so asking for the whole buffer on
+	// every wakeup is guaranteed to underrun until enough periods accumulate.
+	// Size each callback to one shared-mode device period instead.
+	if e.cfg.ShareMode == audio.ShareModeShared {
+		if period, _, err := stream.GetDevicePeriod(); err == nil && period > 0 {
+			frames := int(math.Round(float64(period) * float64(audioFormat.SampleRate) / float64(time.Second)))
+			if frames > 0 && frames <= numFrames {
+				callbackFrames = frames
+				callbackPeriod = period
+			}
+		}
+	}
+	if callbackPeriod <= 0 {
+		callbackPeriod = 10 * time.Millisecond
+	}
+
+	renderChannels := make([][]float64, numChannels)
+	for ch := 0; ch < numChannels; ch++ {
+		renderChannels[ch] = channels[ch][:callbackFrames]
+	}
+	rawFrameBytes := len(rawBytes) / numFrames
+	callbackRawBytes := rawBytes[:rawFrameBytes*callbackFrames]
+	waitHandle := stream.GetWaitHandle()
 
 	for {
 		// 1. Check for device invalidation (e.g. USB unplug)
@@ -474,8 +507,35 @@ func (e *AudioEngine) renderLoop() {
 			e.diagnostics.SetLastErrorCode(0xDEADBEEF)
 			e.stateMachine.ForceState(StateFaulted)
 			e.diagnostics.SetCurrentState(StateFaulted)
-			_ = e.stream.Stop()
+			_ = stream.Stop()
 			return
+		}
+
+		// Event-driven backends signal once per device period. Wait before
+		// rendering so the first post-preroll callback does not query a buffer
+		// that is still completely full. Mock and external streams without a
+		// wait handle retain the immediate-render/period-sleep cadence.
+		if waitHandle != 0 {
+			timeout := callbackPeriod * 4
+			if timeout < 50*time.Millisecond {
+				timeout = 50 * time.Millisecond
+			}
+			signaled, err := platform.WaitForWaitHandle(waitHandle, timeout)
+			if err != nil || !signaled {
+				e.diagnostics.IncrementLateCallbacks()
+			}
+			if e.invalidated.Load() {
+				e.fader.Mute()
+				return
+			}
+			if fErr := e.faultInjected.Load(); fErr != nil {
+				e.fader.Mute()
+				e.diagnostics.SetLastErrorCode(0xDEADBEEF)
+				e.stateMachine.ForceState(StateFaulted)
+				e.diagnostics.SetCurrentState(StateFaulted)
+				_ = stream.Stop()
+				return
+			}
 		}
 
 		startTime := time.Now()
@@ -484,12 +544,12 @@ func (e *AudioEngine) renderLoop() {
 		var fadeOutFinished bool
 		if e.rawProvider != nil {
 			// Direct zero-copy raw frame rendering (DoP / bit-perfect PRBS)
-			if err := e.rawProvider.ProvideFrames(rawBytes, numFrames); err != nil {
+			if err := e.rawProvider.ProvideFrames(callbackRawBytes, callbackFrames); err != nil {
 				e.fader.Mute()
 				e.diagnostics.SetLastErrorCode(0xE0000002)
 				e.stateMachine.ForceState(StateFaulted)
 				e.diagnostics.SetCurrentState(StateFaulted)
-				_ = e.stream.Stop()
+				_ = stream.Stop()
 				return
 			}
 		} else {
@@ -499,38 +559,38 @@ func (e *AudioEngine) renderLoop() {
 				e.diagnostics.SetLastErrorCode(0xE0000004)
 				e.stateMachine.ForceState(StateFaulted)
 				e.diagnostics.SetCurrentState(StateFaulted)
-				_ = e.stream.Stop()
+				_ = stream.Stop()
 				return
 			}
 			gen := genRef.generator
 
 			// 3. Render waveform samples for all channels
 			if mg, ok := gen.(dsp.MultiChannelGenerator); ok {
-				mg.RenderChannels(channels[:numChannels])
+				mg.RenderChannels(renderChannels)
 			} else {
 				for ch := 0; ch < numChannels; ch++ {
-					gen.Render(channels[ch])
+					gen.Render(renderChannels[ch])
 				}
 			}
 
 			// 4. Apply smooth fader envelope
-			fadeOutFinished = e.fader.ApplyChannels(channels)
+			fadeOutFinished = e.fader.ApplyChannels(renderChannels)
 
 			// 5. Interleave and quantize into raw bytes (Zero allocations)
-			interleaveErr := format.Interleave(rawBytes, channels, audioFormat, allowClipping)
+			interleaveErr := format.Interleave(callbackRawBytes, renderChannels, audioFormat, allowClipping)
 			if interleaveErr != nil {
 				// Overload or format error: immediate safe mute
 				e.fader.Mute()
 				e.diagnostics.SetLastErrorCode(0xE0000001)
 				e.stateMachine.ForceState(StateFaulted)
 				e.diagnostics.SetCurrentState(StateFaulted)
-				_ = e.stream.Stop()
+				_ = stream.Stop()
 				return
 			}
 		}
 
 		// 6. Submit buffer to audio driver
-		pBuf, err := e.stream.GetBuffer(numFrames)
+		pBuf, err := stream.GetBuffer(callbackFrames)
 		if err != nil {
 			e.diagnostics.IncrementUnderruns()
 			if e.rawProvider != nil {
@@ -538,19 +598,19 @@ func (e *AudioEngine) renderLoop() {
 				e.rawProvider.Reset()
 				e.stateMachine.ForceState(StateOpenMuted)
 				e.diagnostics.SetCurrentState(StateOpenMuted)
-				_ = e.stream.Stop()
+				_ = stream.Stop()
 				return
 			}
 		} else if pBuf != 0 {
 			// Copy pre-rendered bytes to driver buffer without allocation
-			dstSlice := unsafe.Slice((*byte)(unsafe.Pointer(pBuf)), len(rawBytes))
-			copy(dstSlice, rawBytes)
-			if err := e.stream.ReleaseBuffer(numFrames, 0); err != nil {
+			dstSlice := unsafe.Slice((*byte)(unsafe.Pointer(pBuf)), len(callbackRawBytes))
+			copy(dstSlice, callbackRawBytes)
+			if err := stream.ReleaseBuffer(callbackFrames, 0); err != nil {
 				e.fader.Mute()
 				e.diagnostics.SetLastErrorCode(0xE0000003)
 				e.stateMachine.ForceState(StateFaulted)
 				e.diagnostics.SetCurrentState(StateFaulted)
-				_ = e.stream.Stop()
+				_ = stream.Stop()
 				return
 			}
 		}
@@ -563,31 +623,17 @@ func (e *AudioEngine) renderLoop() {
 			e.rawProvider.Reset()
 			e.stateMachine.Transition(EventFadeOutComplete)
 			e.diagnostics.SetCurrentState(StateOpenMuted)
-			_ = e.stream.Stop()
+			_ = stream.Stop()
 			return
 		} else if (fadeOutFinished || e.fader.State() == FaderStateMuted) && e.stopSignal.Load() {
 			e.stateMachine.Transition(EventFadeOutComplete)
 			e.diagnostics.SetCurrentState(StateOpenMuted)
-			_ = e.stream.Stop()
+			_ = stream.Stop()
 			return
 		}
 
-		// 8. Event-driven synchronization with driver audio hardware
-		// In production WASAPI event callback, wait on stream wait handle for DAC buffer request.
-		// If handle is 0 (mock stream in unit tests), fallback to time.Sleep.
-		period := time.Duration(float64(numFrames) / float64(audioFormat.SampleRate) * float64(time.Second))
-		hWait := e.stream.GetWaitHandle()
-		if hWait != 0 {
-			timeout := period * 4
-			if timeout < 50*time.Millisecond {
-				timeout = 50 * time.Millisecond
-			}
-			signaled, err := platform.WaitForWaitHandle(hWait, timeout)
-			if err != nil || !signaled {
-				e.diagnostics.IncrementLateCallbacks()
-			}
-		} else if period > 0 {
-			time.Sleep(period)
+		if waitHandle == 0 {
+			time.Sleep(callbackPeriod)
 		}
 	}
 }

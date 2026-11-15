@@ -69,9 +69,9 @@ func newWASAPIDevice(pDevice uintptr) (*WASAPIDevice, error) {
 	}, nil
 }
 
-func (d *WASAPIDevice) ID() string         { return d.info.ID }
-func (d *WASAPIDevice) Name() string       { return d.info.Name }
-func (d *WASAPIDevice) Flow() audio.DeviceFlow { return d.info.Flow }
+func (d *WASAPIDevice) ID() string               { return d.info.ID }
+func (d *WASAPIDevice) Name() string             { return d.info.Name }
+func (d *WASAPIDevice) Flow() audio.DeviceFlow   { return d.info.Flow }
 func (d *WASAPIDevice) State() audio.DeviceState { return d.info.State }
 
 func (d *WASAPIDevice) activateAudioClient() (uintptr, error) {
@@ -186,10 +186,7 @@ func (d *WASAPIDevice) OpenStream(config audio.StreamConfig) (audio.AudioStream,
 		hnsPeriodicity = 0
 	}
 
-	streamFlags := uint32(AUDCLNT_STREAMFLAGS_EVENTCALLBACK)
-	if wasapiShareMode == AUDCLNT_SHAREMODE_SHARED {
-		streamFlags |= AUDCLNT_STREAMFLAGS_NOPERSIST
-	}
+	streamFlags := streamFlagsForShareMode(config.ShareMode)
 	wf := ConvertAudioFormatToWaveFormat(config.Format)
 
 	hr := callCOM(
@@ -261,6 +258,19 @@ func (d *WASAPIDevice) OpenStream(config audio.StreamConfig) (audio.AudioStream,
 		format:       config.Format,
 		shareMode:    config.ShareMode,
 	}, nil
+}
+
+func streamFlagsForShareMode(shareMode audio.ShareMode) uint32 {
+	flags := uint32(AUDCLNT_STREAMFLAGS_EVENTCALLBACK)
+	if shareMode == audio.ShareModeShared {
+		// Shared mode must accept the application format even when it differs
+		// from the endpoint mix format. Windows performs the conversion and
+		// resampling in the audio engine.
+		flags |= AUDCLNT_STREAMFLAGS_NOPERSIST |
+			AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+			AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY
+	}
+	return flags
 }
 
 // Close releases the IMMDevice reference.
